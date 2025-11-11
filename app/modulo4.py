@@ -4,6 +4,8 @@ import re
 from typing import TypedDict, Annotated
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
+from langgraph.types import interrupt
+from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage
 from dotenv import load_dotenv
@@ -11,6 +13,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Cargar variables de entorno
 load_dotenv()
+
+def check_langsmith_config():
+    """Verifica si LangSmith está configurado correctamente."""
+    langsmith_key = os.getenv("LANGCHAIN_API_KEY")
+    tracing_enabled = os.getenv("LANGCHAIN_TRACING_V2")
+    
+    if langsmith_key and tracing_enabled == "true":
+        print("✅ LangSmith tracing ACTIVADO")
+        print(f"📊 Proyecto: {os.getenv('LANGCHAIN_PROJECT', 'default')}")
+        return True
+    else:
+        print("⚠️  LangSmith NO configurado (ejecutando sin tracing)")
+        return False
 
 # ============================================
 # STATE DEFINITION
@@ -62,7 +77,6 @@ def is_valid_topic(text: str) -> bool:
         return False
     
     # Should contain mostly letters (allow spaces and some punctuation)
-    # Remove spaces and check if at least 70% are letters
     cleaned = text.replace(" ", "")
     if not cleaned:
         return False
@@ -112,53 +126,30 @@ def extract_topic_node(state: State):
     return state
 
 def ask_quantity_node(state: State):
-    """Ask how many jokes."""
-    # Check if there was an error
+    """Ask and validate quantity using interrupt."""
+    # Check if there was an error in previous step
     if state.get("error"):
         return state
     
     topic = state["topic"]
+    question = f"¿Cuántos chistes deseas sobre '{topic}'? (1-9)"
     
-    question = AIMessage(content=f"¿Cuántos chistes desea de {topic}? (1-9)")
-    
-    return {"messages": [question]}
-
-def parse_quantity_node(state: State):
-    """Parse and validate quantity from user's message."""
-    messages = state["messages"]
-    
-    # Get only messages AFTER the quantity question
-    # Find the last AI message asking for quantity
-    last_ai_idx = -1
-    for i in range(len(messages) - 1, -1, -1):
-        if isinstance(messages[i], AIMessage) and "¿Cuántos chistes" in messages[i].content:
-            last_ai_idx = i
-            break
-    
-    # Get user messages after that
-    if last_ai_idx >= 0:
-        user_msgs_after = [
-            msg for i, msg in enumerate(messages)
-            if i > last_ai_idx and isinstance(msg, HumanMessage)
-        ]
+    # Loop de validación con interrupt
+    while True:
+        answer = interrupt(question)
         
-        if user_msgs_after:
-            text = user_msgs_after[-1].content.strip()
-            
-            num = parse_number(text)
-            
-            if num is None:
-                return {
-                    "error": "invalid_number",
-                    "messages": [
-                        AIMessage(content="❌ Por favor ingresa un número válido entre 1 y 9.")
-                    ]
-                }
-            
-            return {"num_jokes": num, "error": None}
+        # Validar respuesta
+        num = parse_number(str(answer))
+        
+        if num is None:
+            question = f"❌ '{answer}' no es válido. Por favor ingresa un número entre 1 y 9:"
+            continue
+        
+        # Si es válido, salir del loop
+        break
     
-    # Default fallback
-    return {"num_jokes": 3, "error": None}
+    print(f"[DEBUG] Usuario solicitó {num} chistes sobre: {topic}")
+    return {"num_jokes": num, "error": None}
 
 def generate_jokes_parallel_node(state: State):
     """Generate N jokes in PARALLEL about the TOPIC."""
@@ -172,13 +163,12 @@ def generate_jokes_parallel_node(state: State):
     if not topic or not num_jokes:
         return state
     
-    print(f"[DEBUG] Generating {num_jokes} jokes about: {topic}")
+    print(f"\n🎭 Generando {num_jokes} chistes en paralelo sobre '{topic}'...\n")
     
     jokes = []
     
     # Execute in parallel
     with ThreadPoolExecutor(max_workers=num_jokes) as executor:
-        # IMPORTANTE: Pasar el TOPIC, no num_jokes
         futures = [
             executor.submit(generate_single_joke, topic)
             for _ in range(num_jokes)
@@ -205,11 +195,17 @@ def map_reduce_node(state: State):
         final_msg = AIMessage(content="No se pudieron generar chistes.")
         return {"messages": [final_msg]}
     
-    # Map-Reduce
-    formatted = "\n---\n".join(
-        f"Chiste {i+1}:\n{joke}"
+    # Map-Reduce: formatear todos los chistes
+    formatted = "\n\n" + "="*60 + "\n"
+    formatted += "🎉 AQUÍ ESTÁN TUS CHISTES 🎉\n"
+    formatted += "="*60 + "\n\n"
+    
+    formatted += "\n\n".join(
+        f"😂 Chiste {i+1}:\n{joke}"
         for i, joke in enumerate(jokes)
     )
+    
+    formatted += "\n\n" + "="*60
     
     final_msg = AIMessage(content=formatted)
     
@@ -228,17 +224,16 @@ def check_error(state: State):
 # BUILD GRAPH
 # ============================================
 def create_graph():
-    """Build the graph with error handling."""
+    """Build the graph with interrupt support."""
     workflow = StateGraph(State)
     
     # Add nodes
     workflow.add_node("extract_topic", extract_topic_node)
     workflow.add_node("ask_quantity", ask_quantity_node)
-    workflow.add_node("parse_quantity", parse_quantity_node)
     workflow.add_node("generate_parallel", generate_jokes_parallel_node)
     workflow.add_node("map_reduce", map_reduce_node)
     
-    # Flow
+    # Flow simplificado
     workflow.add_edge(START, "extract_topic")
     
     # Check if topic is valid
@@ -246,119 +241,109 @@ def create_graph():
         "extract_topic",
         check_error,
         {
-            "error": END,  # Stop if invalid topic
+            "error": END,
             "continue": "ask_quantity"
         }
     )
     
-    workflow.add_edge("ask_quantity", "parse_quantity")
-    
-    # Check if quantity is valid
-    workflow.add_conditional_edges(
-        "parse_quantity",
-        check_error,
-        {
-            "error": END,  # Stop if invalid number
-            "continue": "generate_parallel"
-        }
-    )
-    
+    # El interrupt en ask_quantity maneja la pausa
+    workflow.add_edge("ask_quantity", "generate_parallel")
     workflow.add_edge("generate_parallel", "map_reduce")
     workflow.add_edge("map_reduce", END)
     
-    return workflow.compile()
+    # IMPORTANTE: compilar con checkpointer para que interrupt funcione
+    checkpointer = MemorySaver()
+    return workflow.compile(checkpointer=checkpointer)
 
 # ============================================
 # MAIN
 # ============================================
 def main():
-    """Run the joke bot."""
+    """Run the joke bot with interrupt support."""
     
     print("\n" + "="*60)
-    print("😂  PARALLEL JOKE GENERATOR  😂".center(60))
+    print("😂  GENERADOR DE CHISTES EN PARALELO  😂".center(60))
     print("="*60)
     print("Ingresa un tema para generar chistes")
     print("="*60 + "\n")
     
     graph = create_graph()
     
+    # Config con thread_id para mantener estado entre invocaciones
+    config = {"configurable": {"thread_id": "joke-session-1"}}
+    
     # ============================================
-    # STEP 1: Get and validate topic
+    # STEP 1: Pedir y validar topic
     # ============================================
     while True:
+        print("User: ", end="")
+        topic_input = input().strip()
+        
+        if not topic_input:
+            print("❌ No ingresaste nada. Intenta de nuevo.\n")
+            continue
+        
+        # Estado inicial
         state = {
-            "messages": [],
+            "messages": [HumanMessage(content=topic_input)],
             "topic": None,
             "num_jokes": None,
             "jokes": [],
             "error": None
         }
         
-        print("User: ", end="")
-        topic_input = input().strip()
-        
-        if not topic_input:
-            print("No ingresaste nada. Intenta de nuevo.\n")
+        # Primera invocación - valida el topic y llega hasta el interrupt
+        try:
+            result = graph.invoke(state, config)
+            
+            # Si hay error de topic inválido, mostrar mensaje y reintentar
+            if result.get("error") == "invalid_topic":
+                ai_msgs = [msg for msg in result["messages"] if isinstance(msg, AIMessage)]
+                if ai_msgs:
+                    print(f"\n{ai_msgs[-1].content}\n")
+                # Reiniciar con nuevo thread_id para limpiar estado
+                config = {"configurable": {"thread_id": f"joke-session-{os.urandom(4).hex()}"}}
+                continue
+            
+            # Si llegamos aquí, el topic es válido y estamos en el interrupt
+            break
+            
+        except Exception as e:
+            print(f"\n❌ Error: {e}\n")
             continue
-        
-        state["messages"].append(HumanMessage(content=topic_input))
-        
-        # Validate topic
-        result = graph.invoke(state)
-        
-        # Check if there was an error
-        if result.get("error") == "invalid_topic":
-            ai_msgs = [msg for msg in result["messages"] if isinstance(msg, AIMessage)]
-            if ai_msgs:
-                print(f"\nAI: {ai_msgs[-1].content}\n")
-            continue  # Ask for topic again
-        
-        # Topic is valid, show question
-        ai_msgs = [msg for msg in result["messages"] if isinstance(msg, AIMessage)]
-        if ai_msgs:
-            print(f"\nAI: {ai_msgs[0].content}\n")
-        
-        break  # Exit topic loop
     
     # ============================================
-    # STEP 2: Get and validate quantity
+    # STEP 2: El interrupt está esperando la cantidad
     # ============================================
+    # El grafo está pausado en ask_quantity esperando respuesta
+    # Simplemente pedimos input y resumimos
     while True:
-        print("User: ", end="")
+        print("\nUser: ", end="")
         quantity_input = input().strip()
         
         if not quantity_input:
-            print("No ingresaste nada. Intenta de nuevo.\n")
+            print("❌ No ingresaste nada. Intenta de nuevo.")
             continue
         
-        # Add to messages
-        result["messages"].append(HumanMessage(content=quantity_input))
-        
-        # Continue graph
-        print("\n🎭 Generando chistes en paralelo...\n")
-        
-        final_result = graph.invoke(result)
-        
-        # Check if there was an error with the number
-        if final_result.get("error") == "invalid_number":
-            ai_msgs = [msg for msg in final_result["messages"] if isinstance(msg, AIMessage)]
-            if ai_msgs:
-                print(f"\nAI: {ai_msgs[-1].content}\n")
+        try:
+            # Resumir la ejecución pasando la respuesta del usuario
+            # El interrupt() en ask_quantity_node recibirá quantity_input
+            final_result = graph.invoke(quantity_input, config)
             
-            # Remove the invalid input and try again
-            result["messages"] = result["messages"][:-1]
-            continue
-        
-        # Success! Show jokes
-        ai_final = [msg for msg in final_result["messages"] if isinstance(msg, AIMessage)]
-        
-        if ai_final:
-            print(f"AI:\n{ai_final[-1].content}\n")
-        
-        break  # Exit quantity loop
+            # Si el grafo terminó completamente, mostrar resultados
+            if final_result.get("jokes"):
+                # Mostrar los chistes
+                ai_msgs = [msg for msg in final_result["messages"] if isinstance(msg, AIMessage)]
+                if ai_msgs:
+                    print(f"\n{ai_msgs[-1].content}\n")
+                break
+            
+        except Exception as e:
+            print(f"\n❌ Error inesperado: {e}\n")
+            break
     
     print("="*60)
-    print("Conversación finalizada. ¡Gracias! 😂")
+    print("¡Gracias por usar el generador de chistes! 😂")
     print("="*60 + "\n")
 
 # ============================================
@@ -366,9 +351,10 @@ def main():
 # ============================================
 if __name__ == "__main__":
     api_key = os.getenv("OPENAI_API_KEY")
+    check_langsmith_config()
     
     if not api_key:
         print("\n❌ ERROR: OPENAI_API_KEY not found!")
-        print("Create .env with: OPENAI_API_KEY=your_key\n")
+        print("Crea un archivo .env con: OPENAI_API_KEY=tu_clave\n")
     else:
         main()
