@@ -1,2 +1,4 @@
 # environment files
 .env
+venv/
+app/agent-appoiments/__pycache__/
