@@ -18,7 +18,6 @@ class TestExitIntentDetection:
         "quit",
         "no thanks",
         "I don't need help anymore",
-        "cancel",
         "nevermind",
         # Spanish
         "adios",
@@ -27,11 +26,11 @@ class TestExitIntentDetection:
         "hasta luego",
         "no gracias",
         "no necesito",
-        "cancelar",
         "salir",
         "terminar",
         "finalizar",
         "ya no",
+        # Note: "cancel"/"cancelar" handled by CancellationIntentDetector
     ])
     def test_exit_phrases_detected(self, detector, message):
         """Common exit phrases in English and Spanish are detected."""

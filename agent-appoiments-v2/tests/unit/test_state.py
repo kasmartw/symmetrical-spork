@@ -68,9 +68,9 @@ class TestStateTransitions:
             ConversationState.COLLECT_NAME
         ) is False
 
-    def test_complete_state_is_terminal(self):
-        """COMPLETE state has no valid transitions."""
-        assert len(VALID_TRANSITIONS[ConversationState.COMPLETE]) == 0
+    def test_complete_state_transitions_to_post_action(self):
+        """COMPLETE state transitions to POST_ACTION for continued service (v1.2)."""
+        assert ConversationState.POST_ACTION in VALID_TRANSITIONS[ConversationState.COMPLETE]
 
     def test_all_states_have_transitions_defined(self):
         """Every state has transition rules."""
