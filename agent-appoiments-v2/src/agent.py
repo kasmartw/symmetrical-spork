@@ -24,6 +24,10 @@ from src.tools import (
     get_availability_tool,
     create_appointment_tool
 )
+from src.tools_cancellation import (
+    cancel_appointment_tool,
+    get_user_appointments_tool
+)
 from src.security import PromptInjectionDetector
 from src.tracing import setup_langsmith_tracing
 
@@ -39,11 +43,15 @@ detector = PromptInjectionDetector(threshold=0.9, use_ml_scanner=False)
 
 # Tools list
 tools = [
+    # Booking tools
     get_services_tool,
     get_availability_tool,
     validate_email_tool,
     validate_phone_tool,
     create_appointment_tool,
+    # Cancellation tools (v1.2)
+    cancel_appointment_tool,
+    get_user_appointments_tool,
 ]
 
 # LLM with tools bound
@@ -56,40 +64,32 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 def build_system_prompt(state: AppointmentState) -> str:
-    """Build context-aware system prompt with complete booking flow."""
+    """Build context-aware system prompt."""
     current = state["current_state"]
 
-    base = """You are a friendly appointment booking assistant for Downtown Medical Center.
+    base = """You are a friendly assistant for booking and cancelling appointments at Downtown Medical Center.
 
-CONVERSATION FLOW (follow this exact order):
-1. GREETING - Welcome user and call get_services_tool to show available services
-2. COLLECT_SERVICE - User selects service, then call get_availability_tool
-3. COLLECT_DATE - User chooses a date from available slots
-4. COLLECT_TIME - User chooses a time from available slots
-5. COLLECT_NAME - Ask for user's full name
-6. COLLECT_EMAIL - Ask for email and call validate_email_tool
-7. COLLECT_PHONE - Ask for phone and call validate_phone_tool
-8. SHOW_SUMMARY - Present complete summary for confirmation
-9. CONFIRM - Wait for user to confirm (yes/no)
-10. CREATE_APPOINTMENT - Call create_appointment_tool with all data
-11. COMPLETE - Show confirmation number and thank user
+IMPORTANT: Respond in the SAME LANGUAGE the user speaks to you (Spanish, English, etc).
+
+AVAILABLE FLOWS:
+1. BOOKING - Schedule new appointment (11 steps)
+2. CANCELLATION - Cancel existing appointment (4 steps)
+3. POST-ACTION - Options menu after completing action
 
 RULES:
-✅ Ask ONE question at a time
-✅ ALWAYS use get_services_tool first to show services
-✅ ALWAYS use get_availability_tool after service selection
-✅ ALWAYS validate email with validate_email_tool
-✅ ALWAYS validate phone with validate_phone_tool
-✅ ALWAYS show summary before confirmation
-✅ Only create appointment after user confirms "yes"
+✅ Ask ONE thing at a time
+✅ Use available tools
 ✅ Be friendly and professional
+✅ Validate data before confirming
 
-AVAILABLE TOOLS:
-- get_services_tool() - Get list of services (use at start)
-- get_availability_tool(service_id, date_from) - Get time slots
-- validate_email_tool(email) - Validate email format
-- validate_phone_tool(phone) - Validate phone number
-- create_appointment_tool(service_id, date, start_time, name, email, phone)
+TOOLS:
+- get_services_tool() - List services
+- get_availability_tool(service_id, date_from) - View schedules
+- validate_email_tool(email) - Validate email
+- validate_phone_tool(phone) - Validate phone
+- create_appointment_tool(...) - Create appointment
+- cancel_appointment_tool(confirmation_number) - Cancel appointment
+- get_user_appointments_tool(email) - Find appointments by email
 """
 
     state_prompts = {
@@ -153,11 +153,34 @@ AVAILABLE TOOLS:
             "ACTION: Show confirmation number and thank user.\n"
             "Wish them a great day!"
         ),
+
+        # Cancellation states (v1.2)
+        ConversationState.CANCEL_ASK_CONFIRMATION: (
+            "\nCURRENT STATE: CANCEL_ASK_CONFIRMATION\n"
+            "ACTION: Ask user for their confirmation number (e.g., APPT-1234)"
+        ),
+        ConversationState.CANCEL_VERIFY: (
+            "\nCURRENT STATE: CANCEL_VERIFY\n"
+            "ACTION: Call cancel_appointment_tool(confirmation_number) to verify appointment"
+        ),
+        ConversationState.CANCEL_CONFIRM: (
+            "\nCURRENT STATE: CANCEL_CONFIRM\n"
+            "ACTION: Ask 'Are you sure you want to cancel this appointment?'"
+        ),
+        ConversationState.CANCEL_PROCESS: (
+            "\nCURRENT STATE: CANCEL_PROCESS\n"
+            "ACTION: Execute cancellation with cancel_appointment_tool"
+        ),
+        ConversationState.POST_ACTION: (
+            "\nCURRENT STATE: POST_ACTION\n"
+            "ACTION: Ask 'Need anything else? I can help you book an appointment or cancel another.'"
+        ),
     }
 
     # Handle both enum and string values
     current_value = current.value if hasattr(current, 'value') else current
     instruction = state_prompts.get(current, f"\nCURRENT STATE: {current_value}")
+
     return base + instruction
 
 

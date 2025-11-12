@@ -16,9 +16,12 @@ class ConversationState(str, Enum):
     """
     Discrete conversation states.
 
-    State machine is unidirectional with one allowed path.
-    Each state represents a specific data collection step.
+    Supports two flows:
+    - Booking flow (11 states)
+    - Cancellation flow (4 states)
+    - Hub state (1 state)
     """
+    # Booking flow states
     COLLECT_SERVICE = "collect_service"
     SHOW_AVAILABILITY = "show_availability"
     COLLECT_DATE = "collect_date"
@@ -30,6 +33,15 @@ class ConversationState(str, Enum):
     CONFIRM = "confirm"
     CREATE_APPOINTMENT = "create_appointment"
     COMPLETE = "complete"
+
+    # Cancellation flow states (v1.2)
+    CANCEL_ASK_CONFIRMATION = "cancel_ask_confirmation"
+    CANCEL_VERIFY = "cancel_verify"
+    CANCEL_CONFIRM = "cancel_confirm"
+    CANCEL_PROCESS = "cancel_process"
+
+    # Hub state (v1.2)
+    POST_ACTION = "post_action"
 
 
 class CollectedData(TypedDict, total=False):
@@ -58,6 +70,7 @@ class AppointmentState(TypedDict):
     - current_state: Explicit state tracking
     - collected_data: Structured, validated data
     - available_slots: Transient API data
+    - retry_count: Retry tracking for error handling (v1.2)
 
     Pattern from: LangGraph Best Practices (Swarnendu De, 2025)
     """
@@ -65,6 +78,7 @@ class AppointmentState(TypedDict):
     current_state: ConversationState
     collected_data: CollectedData
     available_slots: list  # Temporary storage for API responses
+    retry_count: Dict[str, int]  # {"cancel": 0} (v1.2)
 
 
 # Type alias for clarity
@@ -74,20 +88,74 @@ State = AppointmentState
 # State machine transition map
 # Pattern: Current state → [allowed next states]
 VALID_TRANSITIONS: Dict[ConversationState, list[ConversationState]] = {
-    ConversationState.COLLECT_SERVICE: [ConversationState.SHOW_AVAILABILITY],
-    ConversationState.SHOW_AVAILABILITY: [ConversationState.COLLECT_DATE],
-    ConversationState.COLLECT_DATE: [ConversationState.COLLECT_TIME],
-    ConversationState.COLLECT_TIME: [ConversationState.COLLECT_NAME],
-    ConversationState.COLLECT_NAME: [ConversationState.COLLECT_EMAIL],
-    ConversationState.COLLECT_EMAIL: [ConversationState.COLLECT_PHONE],
-    ConversationState.COLLECT_PHONE: [ConversationState.SHOW_SUMMARY],
-    ConversationState.SHOW_SUMMARY: [ConversationState.CONFIRM],
+    # Booking flow transitions
+    ConversationState.COLLECT_SERVICE: [
+        ConversationState.SHOW_AVAILABILITY,
+        ConversationState.CANCEL_ASK_CONFIRMATION,  # Allow switch to cancel
+    ],
+    ConversationState.SHOW_AVAILABILITY: [
+        ConversationState.COLLECT_DATE,
+        ConversationState.CANCEL_ASK_CONFIRMATION,
+    ],
+    ConversationState.COLLECT_DATE: [
+        ConversationState.COLLECT_TIME,
+        ConversationState.CANCEL_ASK_CONFIRMATION,
+    ],
+    ConversationState.COLLECT_TIME: [
+        ConversationState.COLLECT_NAME,
+        ConversationState.CANCEL_ASK_CONFIRMATION,
+    ],
+    ConversationState.COLLECT_NAME: [
+        ConversationState.COLLECT_EMAIL,
+        ConversationState.CANCEL_ASK_CONFIRMATION,
+    ],
+    ConversationState.COLLECT_EMAIL: [
+        ConversationState.COLLECT_PHONE,
+        ConversationState.CANCEL_ASK_CONFIRMATION,
+    ],
+    ConversationState.COLLECT_PHONE: [
+        ConversationState.SHOW_SUMMARY,
+        ConversationState.CANCEL_ASK_CONFIRMATION,
+    ],
+    ConversationState.SHOW_SUMMARY: [
+        ConversationState.CONFIRM,
+        ConversationState.CANCEL_ASK_CONFIRMATION,
+    ],
     ConversationState.CONFIRM: [
         ConversationState.CREATE_APPOINTMENT,
         ConversationState.COLLECT_TIME,  # Allow retry if user declines
+        ConversationState.CANCEL_ASK_CONFIRMATION,
     ],
-    ConversationState.CREATE_APPOINTMENT: [ConversationState.COMPLETE],
-    ConversationState.COMPLETE: [],  # Terminal state
+    ConversationState.CREATE_APPOINTMENT: [
+        ConversationState.COMPLETE,
+        ConversationState.POST_ACTION,  # New option (v1.2)
+    ],
+    ConversationState.COMPLETE: [
+        ConversationState.POST_ACTION,  # Can continue to menu
+    ],
+
+    # Cancellation flow transitions (v1.2)
+    ConversationState.CANCEL_ASK_CONFIRMATION: [
+        ConversationState.CANCEL_VERIFY,
+    ],
+    ConversationState.CANCEL_VERIFY: [
+        ConversationState.CANCEL_CONFIRM,
+        ConversationState.POST_ACTION,  # Escalation after 2 failures
+    ],
+    ConversationState.CANCEL_CONFIRM: [
+        ConversationState.CANCEL_PROCESS,
+        ConversationState.POST_ACTION,  # User declined
+    ],
+    ConversationState.CANCEL_PROCESS: [
+        ConversationState.POST_ACTION,
+    ],
+
+    # Hub state transitions (v1.2)
+    ConversationState.POST_ACTION: [
+        ConversationState.COLLECT_SERVICE,  # Book new appointment
+        ConversationState.CANCEL_ASK_CONFIRMATION,  # Cancel another
+        # END handled separately
+    ],
 }
 
 
