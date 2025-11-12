@@ -1,19 +1,37 @@
-"""Test cancellation workflow."""
+"""Test cancellation workflow (v1.2 - bilingual)."""
 import pytest
 from src.intent import CancellationIntentDetector, ReschedulingIntentDetector
 
 
 class TestCancellationFlow:
-    """Test appointment cancellation."""
+    """Test appointment cancellation (bilingual support)."""
 
-    def test_detect_cancellation_intent(self):
-        """Detect cancellation from user message."""
+    def test_detect_cancellation_intent_english(self):
+        """Detect cancellation from English messages."""
         detector = CancellationIntentDetector()
 
         messages = [
             "I need to cancel my appointment",
             "Cancel the booking please",
             "Delete my appointment",
+            "cancel",
+            "Remove my appointment",
+        ]
+
+        for msg in messages:
+            assert detector.is_cancellation_intent(msg) is True
+
+    def test_detect_cancellation_intent_spanish(self):
+        """Detect cancellation from Spanish messages."""
+        detector = CancellationIntentDetector()
+
+        messages = [
+            "Quiero cancelar mi cita",
+            "Necesito cancelar",
+            "Eliminar mi cita",
+            "Cancelar",
+            "No puedo ir a la cita",
+            "Mejor otro día",
         ]
 
         for msg in messages:

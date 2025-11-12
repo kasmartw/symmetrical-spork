@@ -11,6 +11,7 @@ class TestExitIntentDetection:
         return ExitIntentDetector()
 
     @pytest.mark.parametrize("message", [
+        # English
         "bye",
         "goodbye",
         "exit",
@@ -19,9 +20,21 @@ class TestExitIntentDetection:
         "I don't need help anymore",
         "cancel",
         "nevermind",
+        # Spanish
+        "adios",
+        "adiós",
+        "chao",
+        "hasta luego",
+        "no gracias",
+        "no necesito",
+        "cancelar",
+        "salir",
+        "terminar",
+        "finalizar",
+        "ya no",
     ])
     def test_exit_phrases_detected(self, detector, message):
-        """Common exit phrases are detected."""
+        """Common exit phrases in English and Spanish are detected."""
         assert detector.is_exit_intent(message) is True
 
     @pytest.mark.parametrize("message", [
@@ -29,7 +42,10 @@ class TestExitIntentDetection:
         "What times are available?",
         "Can you help me?",
         "Hello",
+        "Quiero agendar una cita",
+        "Hola, buenos días",
+        "¿Qué horarios tienen?",
     ])
     def test_normal_messages_not_detected_as_exit(self, detector, message):
-        """Normal messages are not exit intent."""
+        """Normal messages in English and Spanish are not exit intent."""
         assert detector.is_exit_intent(message) is False
