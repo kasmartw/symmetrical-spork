@@ -155,7 +155,9 @@ AVAILABLE TOOLS:
         ),
     }
 
-    instruction = state_prompts.get(current, f"\nCURRENT STATE: {current.value}")
+    # Handle both enum and string values
+    current_value = current.value if hasattr(current, 'value') else current
+    instruction = state_prompts.get(current, f"\nCURRENT STATE: {current_value}")
     return base + instruction
 
 
