@@ -1,7 +1,7 @@
 """Test state schema definitions (LangGraph 1.0 patterns)."""
 import pytest
 from typing import get_type_hints
-from src.state import ConversationState, AppointmentState
+from src.state import ConversationState, AppointmentState, validate_transition, VALID_TRANSITIONS
 
 
 class TestStateSchema:
@@ -42,3 +42,37 @@ class TestStateSchema:
         """AppointmentState has structured data collection."""
         hints = get_type_hints(AppointmentState)
         assert "collected_data" in hints
+
+
+class TestStateTransitions:
+    """Test state machine transition guards."""
+
+    def test_valid_transition_collect_service_to_show_availability(self):
+        """Valid: COLLECT_SERVICE → SHOW_AVAILABILITY."""
+        assert validate_transition(
+            ConversationState.COLLECT_SERVICE,
+            ConversationState.SHOW_AVAILABILITY
+        ) is True
+
+    def test_invalid_transition_skip_states(self):
+        """Invalid: Cannot skip states."""
+        assert validate_transition(
+            ConversationState.COLLECT_SERVICE,
+            ConversationState.COLLECT_DATE
+        ) is False
+
+    def test_invalid_transition_backward(self):
+        """Invalid: No backward transitions."""
+        assert validate_transition(
+            ConversationState.COLLECT_EMAIL,
+            ConversationState.COLLECT_NAME
+        ) is False
+
+    def test_complete_state_is_terminal(self):
+        """COMPLETE state has no valid transitions."""
+        assert len(VALID_TRANSITIONS[ConversationState.COMPLETE]) == 0
+
+    def test_all_states_have_transitions_defined(self):
+        """Every state has transition rules."""
+        for state in ConversationState:
+            assert state in VALID_TRANSITIONS

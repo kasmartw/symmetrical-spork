@@ -7,7 +7,7 @@ Best Practices (2025):
 - Use Enums for discrete states
 """
 from enum import Enum
-from typing import TypedDict, Annotated, Optional
+from typing import TypedDict, Annotated, Optional, Dict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
@@ -69,3 +69,53 @@ class AppointmentState(TypedDict):
 
 # Type alias for clarity
 State = AppointmentState
+
+
+# State machine transition map
+# Pattern: Current state → [allowed next states]
+VALID_TRANSITIONS: Dict[ConversationState, list[ConversationState]] = {
+    ConversationState.COLLECT_SERVICE: [ConversationState.SHOW_AVAILABILITY],
+    ConversationState.SHOW_AVAILABILITY: [ConversationState.COLLECT_DATE],
+    ConversationState.COLLECT_DATE: [ConversationState.COLLECT_TIME],
+    ConversationState.COLLECT_TIME: [ConversationState.COLLECT_NAME],
+    ConversationState.COLLECT_NAME: [ConversationState.COLLECT_EMAIL],
+    ConversationState.COLLECT_EMAIL: [ConversationState.COLLECT_PHONE],
+    ConversationState.COLLECT_PHONE: [ConversationState.SHOW_SUMMARY],
+    ConversationState.SHOW_SUMMARY: [ConversationState.CONFIRM],
+    ConversationState.CONFIRM: [
+        ConversationState.CREATE_APPOINTMENT,
+        ConversationState.COLLECT_TIME,  # Allow retry if user declines
+    ],
+    ConversationState.CREATE_APPOINTMENT: [ConversationState.COMPLETE],
+    ConversationState.COMPLETE: [],  # Terminal state
+}
+
+
+def validate_transition(
+    current: ConversationState,
+    intended: ConversationState
+) -> bool:
+    """
+    Validate state transition.
+
+    Prevents:
+    - Skipping states
+    - Backward transitions (except CONFIRM → COLLECT_TIME)
+    - Invalid jumps
+
+    Args:
+        current: Current conversation state
+        intended: Intended next state
+
+    Returns:
+        True if transition is valid
+
+    Example:
+        >>> validate_transition(
+        ...     ConversationState.COLLECT_SERVICE,
+        ...     ConversationState.SHOW_AVAILABILITY
+        ... )
+        True
+    """
+    allowed = VALID_TRANSITIONS.get(current, [])
+    return intended in allowed
