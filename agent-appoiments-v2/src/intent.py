@@ -50,8 +50,8 @@ class CancellationIntentDetector:
     CANCEL_PATTERNS: List[str] = [
         r'\bcancel\s+(my\s+)?appointment\b',
         r'\bcancel\s+(the\s+)?booking\b',
-        r'\bdelete\s+appointment\b',
-        r'\bremove\s+appointment\b',
+        r'\bdelete\s+(my\s+)?appointment\b',
+        r'\bremove\s+(my\s+)?appointment\b',
     ]
 
     def is_cancellation_intent(self, message: str) -> bool:
