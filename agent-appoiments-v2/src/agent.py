@@ -144,3 +144,40 @@ def create_graph():
     # Compile with checkpointer (LangGraph 1.0)
     checkpointer = MemorySaver()
     return builder.compile(checkpointer=checkpointer)
+
+
+def create_production_graph():
+    """
+    Create graph with PostgreSQL checkpointing (production).
+
+    Use this in production environments with DATABASE_URL set.
+    Falls back to MemorySaver if DATABASE_URL not available.
+    """
+    from src.database import get_postgres_saver
+
+    builder = StateGraph(AppointmentState)
+
+    # Add nodes (same as create_graph)
+    builder.add_node("agent", agent_node)
+    builder.add_node("tools", ToolNode(tools))
+
+    # Edges
+    builder.add_edge(START, "agent")
+    builder.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            "tools": "tools",
+            "end": END,
+        }
+    )
+    builder.add_edge("tools", "agent")
+
+    # Production checkpointer
+    if os.getenv("DATABASE_URL"):
+        with get_postgres_saver() as saver:
+            saver.setup()  # Create tables
+            return builder.compile(checkpointer=saver)
+    else:
+        # Fallback for development
+        return builder.compile(checkpointer=MemorySaver())
