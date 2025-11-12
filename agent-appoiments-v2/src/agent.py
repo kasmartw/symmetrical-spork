@@ -183,32 +183,41 @@ TOOLS:
         # Rescheduling states (v1.3)
         ConversationState.RESCHEDULE_ASK_CONFIRMATION: (
             "\nCURRENT STATE: RESCHEDULE_ASK_CONFIRMATION\n"
-            "ACTION: Ask user for their confirmation number (e.g., APPT-1234) to reschedule"
+            "ACTION: Ask user for their confirmation number ONLY (e.g., APPT-1234).\n"
+            "DO NOT ask for email, phone, or any other information.\n"
+            "Just the confirmation number."
         ),
         ConversationState.RESCHEDULE_VERIFY: (
             "\nCURRENT STATE: RESCHEDULE_VERIFY\n"
-            "ACTION: Call get_appointment_tool(confirmation_number) to verify appointment.\n"
-            "Show current appointment details (service, date, time).\n"
-            "IMPORTANT: Track retry_count['reschedule']. After 2 failures:\n"
-            "- Escalate to human: 'Cannot find appointment after multiple attempts'\n"
-            "- Offer: Book new appointment OR continue to POST_ACTION"
+            "ACTION: Call get_appointment_tool(confirmation_number) using the number provided.\n"
+            "If [APPOINTMENT] appears: Show current details (service, date, time) and move to RESCHEDULE_SELECT_DATETIME.\n"
+            "If [ERROR] appears: Increment retry_count['reschedule'].\n"
+            "- If retry_count['reschedule'] < 2: Ask user to verify the number and try again.\n"
+            "- If retry_count['reschedule'] >= 2: Escalate - 'I apologize, I cannot find your appointment after multiple attempts. "
+            "Let me connect you with a team member who can help. Would you like to book a new appointment instead?'\n"
+            "DO NOT use email or any other method to find appointments. ONLY confirmation number."
         ),
         ConversationState.RESCHEDULE_SELECT_DATETIME: (
             "\nCURRENT STATE: RESCHEDULE_SELECT_DATETIME\n"
             "ACTION: Ask user for NEW date and time they prefer.\n"
             "Call get_availability_tool with the service_id from verified appointment.\n"
-            "Show available slots and let user choose."
+            "Show available slots and let user choose.\n"
+            "DO NOT ask for email, phone, name or any client information - this is already saved."
         ),
         ConversationState.RESCHEDULE_CONFIRM: (
             "\nCURRENT STATE: RESCHEDULE_CONFIRM\n"
             "ACTION: Show summary of change:\n"
-            "- Current: [old date/time]\n"
-            "- New: [new date/time]\n"
-            "Ask 'Confirm rescheduling to new time?'"
+            "- Current appointment: [old date] at [old time]\n"
+            "- New appointment: [new date] at [new time]\n"
+            "- Service: [service name]\n"
+            "Ask 'Do you confirm this change?' (Yes/No)\n"
+            "DO NOT ask for any client information - it's already in the system."
         ),
         ConversationState.RESCHEDULE_PROCESS: (
             "\nCURRENT STATE: RESCHEDULE_PROCESS\n"
-            "ACTION: Call reschedule_appointment_tool(confirmation_number, new_date, new_start_time)"
+            "ACTION: Call reschedule_appointment_tool(confirmation_number, new_date, new_start_time).\n"
+            "Use the confirmation number from RESCHEDULE_VERIFY and the new date/time from RESCHEDULE_SELECT_DATETIME.\n"
+            "Client information (name, email, phone) is automatically preserved - DO NOT ask for it."
         ),
 
         ConversationState.POST_ACTION: (

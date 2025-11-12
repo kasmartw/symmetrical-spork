@@ -12,12 +12,16 @@ Rescheduling allows users to change appointment date/time while preserving all o
 
 **Flow:**
 1. User expresses intent → RESCHEDULE_ASK_CONFIRMATION
-2. Agent asks for confirmation number
-3. Agent verifies appointment and shows current details → RESCHEDULE_VERIFY
-4. Agent asks for new preferred date/time, shows availability → RESCHEDULE_SELECT_DATETIME
+2. Agent asks for **confirmation number ONLY** (no email, no phone)
+3. Agent verifies appointment with confirmation number → RESCHEDULE_VERIFY
+   - Shows current details (service, date, time)
+   - If not found: retry (max 2 attempts) → escalate to human
+4. Agent asks for **new preferred date/time ONLY** → RESCHEDULE_SELECT_DATETIME
+   - Shows available slots
+   - **Does NOT ask** for name, email, or phone (already saved)
 5. User selects new slot
 6. Agent shows summary (old → new) and asks confirmation → RESCHEDULE_CONFIRM
-7. User confirms → Agent reschedules → RESCHEDULE_PROCESS
+7. User confirms → Agent reschedules (preserving client info) → RESCHEDULE_PROCESS
 8. Success → POST_ACTION
 
 ## State Machine
@@ -38,10 +42,20 @@ POST_ACTION
 
 ## Retry Logic
 
+**IMPORTANT: Uses confirmation number ONLY (same as cancellation)**
+
+- Agent asks for **confirmation number** (e.g., APPT-1234)
+- **NO email, NO phone** - only the confirmation number
 - **2 attempts** to provide valid confirmation number
+- System tracks `retry_count['reschedule']`
 - **After 2 failures:**
-  - Escalate: "Cannot find appointment after multiple attempts"
-  - Offer new booking OR return to POST_ACTION menu
+  - Escalate: "I apologize, I cannot find your appointment after multiple attempts. Let me connect you with a team member who can help."
+  - Offer: Book new appointment OR return to POST_ACTION menu
+
+**Client Information:**
+- Email, phone, name are **automatically preserved**
+- Agent should **NEVER ask** for this information during rescheduling
+- Only new date/time are requested
 
 ## API Endpoint
 

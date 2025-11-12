@@ -78,7 +78,7 @@ class AppointmentState(TypedDict):
     - current_state: Explicit state tracking
     - collected_data: Structured, validated data
     - available_slots: Transient API data
-    - retry_count: Retry tracking for error handling (v1.2)
+    - retry_count: Retry tracking for error handling (v1.2, v1.3 - cancel & reschedule)
 
     Pattern from: LangGraph Best Practices (Swarnendu De, 2025)
     """
@@ -86,7 +86,7 @@ class AppointmentState(TypedDict):
     current_state: ConversationState
     collected_data: CollectedData
     available_slots: list  # Temporary storage for API responses
-    retry_count: Dict[str, int]  # {"cancel": 0} (v1.2)
+    retry_count: Dict[str, int]  # {"cancel": 0, "reschedule": 0} (v1.2, v1.3)
 
 
 # Type alias for clarity
