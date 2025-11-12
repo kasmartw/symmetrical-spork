@@ -9,6 +9,8 @@ def cancel_appointment_tool(confirmation_number: str) -> str:
     """
     Cancel an appointment by confirmation number.
 
+    IMPORTANT: This changes the appointment status to 'cancelled' without deleting it.
+
     Args:
         confirmation_number: Appointment confirmation number (e.g., APPT-1234)
 
@@ -16,15 +18,27 @@ def cancel_appointment_tool(confirmation_number: str) -> str:
         Cancellation confirmation message
     """
     try:
-        response = requests.delete(
+        response = requests.patch(
             f"{config.MOCK_API_BASE_URL}/appointments/{confirmation_number}",
             timeout=5
         )
 
         if response.status_code == 200:
-            return f"[SUCCESS] Appointment {confirmation_number} has been cancelled."
+            data = response.json()
+            appointment = data.get("appointment", {})
+            return (
+                f"[SUCCESS] Appointment {confirmation_number} has been cancelled.\n"
+                f"Service: {appointment.get('service_name', 'N/A')}\n"
+                f"Date: {appointment.get('date', 'N/A')} at {appointment.get('start_time', 'N/A')}\n"
+                f"Status: {appointment.get('status', 'N/A')}"
+            )
         elif response.status_code == 404:
             return f"[ERROR] Appointment {confirmation_number} not found."
+        elif response.status_code == 400:
+            # Already cancelled
+            data = response.json()
+            error = data.get("error", "Appointment already cancelled")
+            return f"[ERROR] {error}"
         else:
             return "[ERROR] Error cancelling appointment. Please try again."
 

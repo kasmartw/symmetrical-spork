@@ -92,18 +92,16 @@ def generate_time_slots(service_id, date_from=None):
 
             # Skip past times for today
             if slot_datetime > datetime.now():
-                # Simulate 75% availability (25% randomly booked)
-                is_available = random.random() < 0.75
-
-                # Check if slot is already booked
+                # Check if slot is already booked (deterministic availability)
                 is_booked = any(
                     apt["date"] == current_date.strftime("%Y-%m-%d") and
                     apt["start_time"] == current_time.strftime("%H:%M") and
-                    apt["service_id"] == service_id
+                    apt["service_id"] == service_id and
+                    apt.get("status") != "cancelled"  # Don't count cancelled appointments
                     for apt in appointments
                 )
 
-                if is_available and not is_booked:
+                if not is_booked:
                     end_slot_time = current_time + timedelta(
                         minutes=service["duration_minutes"]
                     )
@@ -339,6 +337,41 @@ def get_appointment(confirmation_number):
     })
 
 
+@app.route('/appointments/<confirmation_number>', methods=['PATCH'])
+def cancel_appointment(confirmation_number):
+    """PATCH /appointments/APPT-1001 - Cancel appointment (change status, don't delete).
+
+    Important: Cancelling does NOT delete the appointment, it only changes status.
+    """
+    appointment = next(
+        (apt for apt in appointments if apt["confirmation_number"] == confirmation_number),
+        None
+    )
+
+    if not appointment:
+        return jsonify({
+            "success": False,
+            "error": f"Appointment '{confirmation_number}' not found"
+        }), 404
+
+    # Check if already cancelled
+    if appointment.get("status") == "cancelled":
+        return jsonify({
+            "success": False,
+            "error": f"Appointment {confirmation_number} is already cancelled"
+        }), 400
+
+    # Update status to cancelled (don't delete)
+    appointment["status"] = "cancelled"
+    appointment["cancelled_at"] = datetime.now().isoformat()
+
+    return jsonify({
+        "success": True,
+        "message": f"Appointment {confirmation_number} has been cancelled",
+        "appointment": appointment
+    })
+
+
 @app.route('/appointments', methods=['GET'])
 def list_appointments():
     """GET /appointments - List all appointments (for debugging)."""
@@ -378,12 +411,13 @@ def print_startup_info():
     print(f"   Slots: {config.OPERATING_HOURS['slot_duration_minutes']} minutes each")
 
     print("\n📡 Endpoints:")
-    print("   GET  /services                     - List services")
-    print("   GET  /availability?service_id=...  - Get time slots")
-    print("   POST /appointments                 - Create appointment")
-    print("   GET  /appointments/<conf_num>      - Get appointment")
-    print("   GET  /appointments                 - List all (debug)")
-    print("   GET  /health                       - Health check")
+    print("   GET   /services                     - List services")
+    print("   GET   /availability?service_id=...  - Get time slots")
+    print("   POST  /appointments                 - Create appointment")
+    print("   GET   /appointments/<conf_num>      - Get appointment")
+    print("   PATCH /appointments/<conf_num>      - Cancel appointment (v1.2)")
+    print("   GET   /appointments                 - List all (debug)")
+    print("   GET   /health                       - Health check")
 
     print("\n✅ Server ready! Waiting for requests...")
     print("=" * 70)
