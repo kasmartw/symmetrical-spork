@@ -303,3 +303,10 @@ yarn-error.log*
 # Keep specific configuration files if needed
 !pytest.ini
 !pyproject.toml
+
+# ============================================================================
+# UNUSED/DEPRECATED CODE (v1.2)
+# ============================================================================
+# Language detection was simplified - LLM handles language automatically
+src/language.py
+tests/unit/test_language_detection.py
