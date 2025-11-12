@@ -372,6 +372,110 @@ def cancel_appointment(confirmation_number):
     })
 
 
+@app.route('/appointments/<confirmation_number>/reschedule', methods=['PUT'])
+def reschedule_appointment(confirmation_number):
+    """PUT /appointments/APPT-1001/reschedule - Reschedule appointment to new date/time.
+
+    Preserves client information and service, only updates date/time.
+
+    Request body:
+    {
+        "date": "2025-11-20",
+        "start_time": "14:00"
+    }
+    """
+    appointment = next(
+        (apt for apt in appointments if apt["confirmation_number"] == confirmation_number),
+        None
+    )
+
+    if not appointment:
+        return jsonify({
+            "success": False,
+            "error": f"Appointment '{confirmation_number}' not found"
+        }), 404
+
+    # Check if cancelled
+    if appointment.get("status") == "cancelled":
+        return jsonify({
+            "success": False,
+            "error": f"Cannot reschedule cancelled appointment {confirmation_number}"
+        }), 400
+
+    # Get new date/time from request
+    data = request.json
+    if not data or "date" not in data or "start_time" not in data:
+        return jsonify({
+            "success": False,
+            "error": "Missing required fields: date, start_time"
+        }), 400
+
+    new_date = data["date"]
+    new_start_time = data["start_time"]
+
+    # Validate new date format
+    try:
+        new_date_obj = datetime.strptime(new_date, "%Y-%m-%d")
+        if new_date_obj.date() < datetime.now().date():
+            return jsonify({
+                "success": False,
+                "error": "New date must be today or in the future"
+            }), 400
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Invalid date format. Use YYYY-MM-DD"
+        }), 400
+
+    # Validate new time format
+    try:
+        datetime.strptime(new_start_time, "%H:%M")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Invalid time format. Use HH:MM"
+        }), 400
+
+    # Check if new slot is available
+    service_id = appointment["service_id"]
+    available_slots = generate_time_slots(service_id)
+
+    slot_available = any(
+        slot["date"] == new_date and
+        slot["start_time"] == new_start_time
+        for slot in available_slots
+    )
+
+    if not slot_available:
+        # Get alternatives
+        alternatives = [
+            s for s in available_slots
+            if s["date"] >= new_date
+        ][:5]
+        return jsonify({
+            "success": False,
+            "error": "This time slot is not available",
+            "alternatives": alternatives
+        }), 409
+
+    # Get service for duration calculation
+    service = next((s for s in config.SERVICES if s["id"] == service_id), None)
+    start_time_obj = datetime.strptime(new_start_time, "%H:%M")
+    end_time_obj = start_time_obj + timedelta(minutes=service['duration_minutes'])
+
+    # Update appointment
+    appointment["date"] = new_date
+    appointment["start_time"] = new_start_time
+    appointment["end_time"] = end_time_obj.strftime("%H:%M")
+    appointment["rescheduled_at"] = datetime.now().isoformat()
+
+    return jsonify({
+        "success": True,
+        "message": f"Appointment {confirmation_number} has been rescheduled",
+        "appointment": appointment
+    })
+
+
 @app.route('/appointments', methods=['GET'])
 def list_appointments():
     """GET /appointments - List all appointments (for debugging)."""
@@ -416,6 +520,7 @@ def print_startup_info():
     print("   POST  /appointments                 - Create appointment")
     print("   GET   /appointments/<conf_num>      - Get appointment")
     print("   PATCH /appointments/<conf_num>      - Cancel appointment (v1.2)")
+    print("   PUT   /appointments/<conf_num>/reschedule - Reschedule appointment (v1.3)")
     print("   GET   /appointments                 - List all (debug)")
     print("   GET   /health                       - Health check")
 

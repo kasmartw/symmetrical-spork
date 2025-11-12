@@ -16,9 +16,10 @@ class ConversationState(str, Enum):
     """
     Discrete conversation states.
 
-    Supports two flows:
+    Supports three flows:
     - Booking flow (11 states)
     - Cancellation flow (4 states)
+    - Rescheduling flow (5 states) (v1.3)
     - Hub state (1 state)
     """
     # Booking flow states
@@ -39,6 +40,13 @@ class ConversationState(str, Enum):
     CANCEL_VERIFY = "cancel_verify"
     CANCEL_CONFIRM = "cancel_confirm"
     CANCEL_PROCESS = "cancel_process"
+
+    # Rescheduling flow states (v1.3)
+    RESCHEDULE_ASK_CONFIRMATION = "reschedule_ask_confirmation"
+    RESCHEDULE_VERIFY = "reschedule_verify"
+    RESCHEDULE_SELECT_DATETIME = "reschedule_select_datetime"
+    RESCHEDULE_CONFIRM = "reschedule_confirm"
+    RESCHEDULE_PROCESS = "reschedule_process"
 
     # Hub state (v1.2)
     POST_ACTION = "post_action"
@@ -92,39 +100,48 @@ VALID_TRANSITIONS: Dict[ConversationState, list[ConversationState]] = {
     ConversationState.COLLECT_SERVICE: [
         ConversationState.SHOW_AVAILABILITY,
         ConversationState.CANCEL_ASK_CONFIRMATION,  # Allow switch to cancel
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # Allow switch to reschedule (v1.3)
     ],
     ConversationState.SHOW_AVAILABILITY: [
         ConversationState.COLLECT_DATE,
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.COLLECT_DATE: [
         ConversationState.COLLECT_TIME,
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.COLLECT_TIME: [
         ConversationState.COLLECT_NAME,
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.COLLECT_NAME: [
         ConversationState.COLLECT_EMAIL,
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.COLLECT_EMAIL: [
         ConversationState.COLLECT_PHONE,
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.COLLECT_PHONE: [
         ConversationState.SHOW_SUMMARY,
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.SHOW_SUMMARY: [
         ConversationState.CONFIRM,
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.CONFIRM: [
         ConversationState.CREATE_APPOINTMENT,
         ConversationState.COLLECT_TIME,  # Allow retry if user declines
         ConversationState.CANCEL_ASK_CONFIRMATION,
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],
     ConversationState.CREATE_APPOINTMENT: [
         ConversationState.COMPLETE,
@@ -150,10 +167,31 @@ VALID_TRANSITIONS: Dict[ConversationState, list[ConversationState]] = {
         ConversationState.POST_ACTION,
     ],
 
+    # Rescheduling flow transitions (v1.3)
+    ConversationState.RESCHEDULE_ASK_CONFIRMATION: [
+        ConversationState.RESCHEDULE_VERIFY,
+    ],
+    ConversationState.RESCHEDULE_VERIFY: [
+        ConversationState.RESCHEDULE_SELECT_DATETIME,
+        ConversationState.POST_ACTION,  # Escalation after 2 failures
+        ConversationState.COLLECT_SERVICE,  # Offer new booking after escalation
+    ],
+    ConversationState.RESCHEDULE_SELECT_DATETIME: [
+        ConversationState.RESCHEDULE_CONFIRM,
+    ],
+    ConversationState.RESCHEDULE_CONFIRM: [
+        ConversationState.RESCHEDULE_PROCESS,
+        ConversationState.RESCHEDULE_SELECT_DATETIME,  # User wants different time
+    ],
+    ConversationState.RESCHEDULE_PROCESS: [
+        ConversationState.POST_ACTION,
+    ],
+
     # Hub state transitions (v1.2)
     ConversationState.POST_ACTION: [
         ConversationState.COLLECT_SERVICE,  # Book new appointment
         ConversationState.CANCEL_ASK_CONFIRMATION,  # Cancel another
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # Reschedule another (v1.3)
         # END handled separately
     ],
 }

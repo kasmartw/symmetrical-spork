@@ -96,13 +96,32 @@ class CancellationIntentDetector:
 
 
 class ReschedulingIntentDetector:
-    """Detect appointment rescheduling intent."""
+    """
+    Detect appointment rescheduling intent (bilingual).
+
+    Pattern: Regex matching for English and Spanish phrases.
+    Supports direct and contextual rescheduling expressions.
+    """
 
     RESCHEDULE_PATTERNS: List[str] = [
-        r'\breschedule\b',
-        r'\bchange\s+(my\s+)?appointment\b',
-        r'\bmove\s+(my\s+)?appointment\b',
-        r'\bdifferent\s+(time|date)\b',
+        # Direct - English
+        r'\breschedule\s+(my\s+)?(appointment|booking)\b',
+        r'\bchange\s+(my\s+)?(appointment|booking|time|date)\b',
+        r'\bmove\s+(my\s+)?(appointment|booking)\b',
+        r'\bmodify\s+(my\s+)?(appointment|booking)\b',
+        r'\breschedule\b',  # Standalone
+
+        # Direct - Spanish
+        r'\breagendar\s+(mi\s+)?(cita|reserva|turno)\b',
+        r'\bcambiar\s+(mi\s+)?(cita|reserva|turno|hora|fecha)\b',
+        r'\bmover\s+(mi\s+)?cita\b',
+        r'\bmodificar\s+(mi\s+)?(cita|reserva)\b',
+        r'\breagendar\b',  # Standalone
+
+        # Contextual
+        r'\b(different|otra)\s+(time|date|hora|fecha)\b',
+        r'\banother\s+(day|time)\b',
+        r'\botro\s+(día|horario)\b',
     ]
 
     def is_rescheduling_intent(self, message: str) -> bool:
