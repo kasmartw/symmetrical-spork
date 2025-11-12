@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "appointment-agent"
-version = "1.0.0"
-description = "Secure appointment booking agent with LangGraph 1.0"
+version = "1.2.0"
+description = "Secure appointment booking agent with LangGraph 1.0 (v1.2 - Performance & Features)"
 requires-python = ">=3.10"
 dependencies = [
     "langgraph>=1.0.3",
@@ -20,6 +20,7 @@ dependencies = [
     "flask>=3.0.0",
     "flask-cors>=4.0.0",
     "psycopg[pool]>=3.1.0",
+    "langsmith>=0.1.0",
 ]
 
 [project.optional-dependencies]
