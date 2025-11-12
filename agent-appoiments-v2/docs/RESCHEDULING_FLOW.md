@@ -47,15 +47,22 @@ POST_ACTION
 - Agent asks for **confirmation number** (e.g., APPT-1234)
 - **NO email, NO phone** - only the confirmation number
 - **2 attempts** to provide valid confirmation number
-- System tracks `retry_count['reschedule']`
+- System **automatically** tracks `retry_count['reschedule']` via `retry_handler` node
 - **After 2 failures:**
-  - Escalate: "I apologize, I cannot find your appointment after multiple attempts. Let me connect you with a team member who can help."
-  - Offer: Book new appointment OR return to POST_ACTION menu
+  - System **automatically** transitions to POST_ACTION state
+  - Escalation message: "I apologize, I cannot find your appointment after multiple attempts. Let me connect you with a team member who can help."
+  - Offers: Book new appointment OR continue with other actions
 
 **Client Information:**
-- Email, phone, name are **automatically preserved**
+- Email, phone, name are **automatically preserved** by the API
 - Agent should **NEVER ask** for this information during rescheduling
 - Only new date/time are requested
+
+**Implementation:**
+- `retry_handler_node` intercepts tool responses after execution
+- Detects `[ERROR]` + `not found` in tool output
+- Automatically increments counter and escalates when needed
+- Works for both cancellation and rescheduling flows
 
 ## API Endpoint
 

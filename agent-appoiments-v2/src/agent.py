@@ -169,7 +169,9 @@ TOOLS:
         ),
         ConversationState.CANCEL_VERIFY: (
             "\nCURRENT STATE: CANCEL_VERIFY\n"
-            "ACTION: Call cancel_appointment_tool(confirmation_number) to verify appointment"
+            "ACTION: Call cancel_appointment_tool(confirmation_number) to verify appointment.\n"
+            "If [ERROR] appears: Ask user to verify the number and try again (system will auto-escalate after 2 failures).\n"
+            "DO NOT manually track retry_count - the system handles this automatically."
         ),
         ConversationState.CANCEL_CONFIRM: (
             "\nCURRENT STATE: CANCEL_CONFIRM\n"
@@ -190,12 +192,10 @@ TOOLS:
         ConversationState.RESCHEDULE_VERIFY: (
             "\nCURRENT STATE: RESCHEDULE_VERIFY\n"
             "ACTION: Call get_appointment_tool(confirmation_number) using the number provided.\n"
-            "If [APPOINTMENT] appears: Show current details (service, date, time) and move to RESCHEDULE_SELECT_DATETIME.\n"
-            "If [ERROR] appears: Increment retry_count['reschedule'].\n"
-            "- If retry_count['reschedule'] < 2: Ask user to verify the number and try again.\n"
-            "- If retry_count['reschedule'] >= 2: Escalate - 'I apologize, I cannot find your appointment after multiple attempts. "
-            "Let me connect you with a team member who can help. Would you like to book a new appointment instead?'\n"
-            "DO NOT use email or any other method to find appointments. ONLY confirmation number."
+            "If [APPOINTMENT] appears: Show current details (service, date, time).\n"
+            "If [ERROR] appears: Ask user to verify the number and try again (system will auto-escalate after 2 failures).\n"
+            "DO NOT use email or any other method to find appointments. ONLY confirmation number.\n"
+            "DO NOT manually track retry_count - the system handles this automatically."
         ),
         ConversationState.RESCHEDULE_SELECT_DATETIME: (
             "\nCURRENT STATE: RESCHEDULE_SELECT_DATETIME\n"
@@ -277,6 +277,68 @@ def should_continue(state: AppointmentState) -> str:
     return "end"
 
 
+def retry_handler_node(state: AppointmentState) -> dict[str, Any]:
+    """
+    Handle retry logic after tool execution (v1.2, v1.3).
+
+    Monitors tool responses and manages retry_count for:
+    - Cancellation flow (CANCEL_VERIFY)
+    - Rescheduling flow (RESCHEDULE_VERIFY)
+
+    After 2 failed attempts, transitions to POST_ACTION with escalation message.
+    """
+    messages = state["messages"]
+    current = state["current_state"]
+    retry_count = state.get("retry_count", {}).copy()
+
+    # Only process in verification states
+    if current not in [ConversationState.CANCEL_VERIFY, ConversationState.RESCHEDULE_VERIFY]:
+        return {}
+
+    # Check last message for tool response
+    if not messages:
+        return {}
+
+    last_msg = messages[-1]
+
+    # Look for tool responses with [ERROR]
+    if hasattr(last_msg, 'content') and isinstance(last_msg.content, str):
+        content = last_msg.content
+
+        # Detect error in tool response
+        if '[ERROR]' in content and 'not found' in content.lower():
+            # Determine flow type
+            flow_key = 'cancel' if current == ConversationState.CANCEL_VERIFY else 'reschedule'
+
+            # Initialize retry count if not exists
+            if flow_key not in retry_count:
+                retry_count[flow_key] = 0
+
+            # Increment retry count
+            retry_count[flow_key] += 1
+
+            # Check if we've exceeded max retries (2)
+            if retry_count[flow_key] >= 2:
+                # Escalate to POST_ACTION
+                escalation_msg = (
+                    "I apologize, I cannot find your appointment after multiple attempts. "
+                    "Let me connect you with a team member who can help. "
+                    "Would you like to book a new appointment instead?"
+                )
+
+                from langchain_core.messages import AIMessage
+                return {
+                    "retry_count": retry_count,
+                    "current_state": ConversationState.POST_ACTION,
+                    "messages": [AIMessage(content=escalation_msg)]
+                }
+            else:
+                # Still have retries left
+                return {"retry_count": retry_count}
+
+    return {}
+
+
 def create_graph():
     """
     Create appointment booking graph (LangGraph 1.0).
@@ -286,6 +348,7 @@ def create_graph():
     - MemorySaver for checkpointing (InMemorySaver deprecated)
     - START/END constants
     - ToolNode for tool execution
+    - retry_handler for automatic retry logic (v1.2, v1.3)
 
     Returns:
         Compiled graph with checkpointer
@@ -295,6 +358,7 @@ def create_graph():
     # Add nodes
     builder.add_node("agent", agent_node)
     builder.add_node("tools", ToolNode(tools))
+    builder.add_node("retry_handler", retry_handler_node)  # v1.2, v1.3
 
     # Edges
     builder.add_edge(START, "agent")
@@ -306,7 +370,9 @@ def create_graph():
             "end": END,
         }
     )
-    builder.add_edge("tools", "agent")
+    # After tools, check for retry logic before returning to agent
+    builder.add_edge("tools", "retry_handler")
+    builder.add_edge("retry_handler", "agent")
 
     # Compile with checkpointer (LangGraph 1.0)
     checkpointer = MemorySaver()
@@ -327,6 +393,7 @@ def create_production_graph():
     # Add nodes (same as create_graph)
     builder.add_node("agent", agent_node)
     builder.add_node("tools", ToolNode(tools))
+    builder.add_node("retry_handler", retry_handler_node)  # v1.2, v1.3
 
     # Edges
     builder.add_edge(START, "agent")
@@ -338,7 +405,9 @@ def create_production_graph():
             "end": END,
         }
     )
-    builder.add_edge("tools", "agent")
+    # After tools, check for retry logic before returning to agent
+    builder.add_edge("tools", "retry_handler")
+    builder.add_edge("retry_handler", "agent")
 
     # Production checkpointer
     if os.getenv("DATABASE_URL"):
