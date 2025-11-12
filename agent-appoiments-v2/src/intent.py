@@ -17,13 +17,23 @@ class ExitIntentDetector:
     """
 
     EXIT_PATTERNS: List[str] = [
+        # English patterns
         r'\b(bye|goodbye|exit|quit)\b',
         r'\bno\s+thanks?\b',
         r'\bnevermind\b',
         r'\bdon\'?t\s+need\b',
         r'\bno\s+longer\b',
-        r'\bcancel\b',
         r'\bstop\b',
+        # Spanish patterns
+        r'\b(adios|adiós|chao|chau)\b',
+        r'\b(hasta\s+luego|hasta\s+pronto)\b',
+        r'\bno\s+gracias\b',
+        r'\bno\s+necesito\b',
+        r'\bno\s+importa\b',
+        r'\bsalir\b',
+        r'\bterminar\b',
+        r'\bfinalizar\b',
+        r'\bya\s+no\b',
     ]
 
     def is_exit_intent(self, message: str) -> bool:
@@ -45,13 +55,34 @@ class ExitIntentDetector:
 
 
 class CancellationIntentDetector:
-    """Detect appointment cancellation intent."""
+    """
+    Detect appointment cancellation intent (bilingual).
+
+    Pattern: Regex matching for English and Spanish phrases.
+    Supports direct, indirect, and contextual cancellation expressions.
+    """
 
     CANCEL_PATTERNS: List[str] = [
-        r'\bcancel\s+(my\s+)?appointment\b',
-        r'\bcancel\s+(the\s+)?booking\b',
+        # Direct - English
+        r'\bcancel\s+(my\s+)?(appointment|booking)\b',
         r'\bdelete\s+(my\s+)?appointment\b',
         r'\bremove\s+(my\s+)?appointment\b',
+        r'\bcancel\b',  # Standalone "cancel"
+
+        # Direct - Spanish
+        r'\bcancelar\s+(mi\s+)?(cita|reserva|turno)\b',
+        r'\beliminar\s+(mi\s+)?cita\b',
+        r'\bborrar\s+(mi\s+)?cita\b',
+        r'\bcancelar\b',  # Standalone "cancelar"
+
+        # Indirect expressions
+        r'\b(olvida|forget|olvídate)\b',
+        r'\bmejor\s+(no|otro\s+día)\b',
+        r'\bya\s+no\b',
+
+        # Contextual (with "appointment"/"cita" mentioned)
+        r'\bno\s+(voy|puedo|podre)\b.*\b(cita|appointment)\b',
+        r'\bno\s+necesito\b.*\b(cita|appointment)\b',
     ]
 
     def is_cancellation_intent(self, message: str) -> bool:

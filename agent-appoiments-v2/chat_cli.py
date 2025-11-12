@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from src.agent import create_graph
 from src.state import ConversationState
+from src.intent import ExitIntentDetector, CancellationIntentDetector
 
 # Load environment
 load_dotenv()
@@ -72,6 +73,10 @@ def main():
         print(f"❌ Error creating graph: {e}")
         sys.exit(1)
 
+    # Initialize intent detectors (v1.2)
+    exit_detector = ExitIntentDetector()
+    cancellation_detector = CancellationIntentDetector()
+
     # Initialize state
     thread_id = "cli-session-001"
     config = {"configurable": {"thread_id": thread_id}}
@@ -80,7 +85,8 @@ def main():
         "messages": [],
         "current_state": ConversationState.COLLECT_SERVICE,
         "collected_data": {},
-        "available_slots": []
+        "available_slots": [],
+        "retry_count": {}  # v1.2
     }
 
     print("💬 Start chatting! (Type /help for commands)\n")
@@ -94,6 +100,18 @@ def main():
             user_input = input("👤 You: ").strip()
 
             if not user_input:
+                continue
+
+            # Check for cancellation intent FIRST (v1.2 - pre-agent routing)
+            if cancellation_detector.is_cancellation_intent(user_input):
+                # Switch to cancellation flow
+                state["current_state"] = ConversationState.CANCEL_ASK_CONFIRMATION
+                print("🔄 [Switching to cancellation flow...]")
+
+            # Check for exit intent AFTER cancellation (avoid conflicts)
+            elif exit_detector.is_exit_intent(user_input):
+                print("\n🤖 Agent: ¡Entiendo! Gracias por tu tiempo. ¡Que tengas un excelente día! 👋\n")
+                conversation_active = False
                 continue
 
             # Handle commands
@@ -121,7 +139,8 @@ def main():
                         "messages": [],
                         "current_state": ConversationState.COLLECT_SERVICE,
                         "collected_data": {},
-                        "available_slots": []
+                        "available_slots": [],
+                        "retry_count": {}  # v1.2
                     }
                     print("\n🔄 Conversation cleared! Starting fresh.\n")
                     continue
