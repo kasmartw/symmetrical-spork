@@ -24,9 +24,11 @@ from src.tools import (
     get_availability_tool,
     create_appointment_tool
 )
-from src.tools_cancellation import (
+from src.tools_appointment_mgmt import (
     cancel_appointment_tool,
-    get_user_appointments_tool
+    get_user_appointments_tool,
+    get_appointment_tool,  # v1.3
+    reschedule_appointment_tool,  # v1.3
 )
 from src.security import PromptInjectionDetector
 from src.tracing import setup_langsmith_tracing
@@ -52,6 +54,9 @@ tools = [
     # Cancellation tools (v1.2)
     cancel_appointment_tool,
     get_user_appointments_tool,
+    # Rescheduling tools (v1.3)
+    get_appointment_tool,
+    reschedule_appointment_tool,
 ]
 
 # LLM with tools bound
@@ -67,14 +72,15 @@ def build_system_prompt(state: AppointmentState) -> str:
     """Build context-aware system prompt."""
     current = state["current_state"]
 
-    base = """You are a friendly assistant for booking and cancelling appointments at Downtown Medical Center.
+    base = """You are a friendly assistant for booking, cancelling, and rescheduling appointments at Downtown Medical Center.
 
 IMPORTANT: Respond in the SAME LANGUAGE the user speaks to you (Spanish, English, etc).
 
 AVAILABLE FLOWS:
 1. BOOKING - Schedule new appointment (11 steps)
 2. CANCELLATION - Cancel existing appointment (4 steps)
-3. POST-ACTION - Options menu after completing action
+3. RESCHEDULING - Change appointment date/time (5 steps)
+4. POST-ACTION - Options menu after completing action
 
 RULES:
 ✅ Ask ONE thing at a time
@@ -90,6 +96,8 @@ TOOLS:
 - create_appointment_tool(...) - Create appointment
 - cancel_appointment_tool(confirmation_number) - Cancel appointment
 - get_user_appointments_tool(email) - Find appointments by email
+- get_appointment_tool(confirmation_number) - Get appointment details (v1.3)
+- reschedule_appointment_tool(confirmation_number, new_date, new_start_time) - Reschedule (v1.3)
 """
 
     state_prompts = {
@@ -171,9 +179,44 @@ TOOLS:
             "\nCURRENT STATE: CANCEL_PROCESS\n"
             "ACTION: Execute cancellation with cancel_appointment_tool"
         ),
+
+        # Rescheduling states (v1.3)
+        ConversationState.RESCHEDULE_ASK_CONFIRMATION: (
+            "\nCURRENT STATE: RESCHEDULE_ASK_CONFIRMATION\n"
+            "ACTION: Ask user for their confirmation number (e.g., APPT-1234) to reschedule"
+        ),
+        ConversationState.RESCHEDULE_VERIFY: (
+            "\nCURRENT STATE: RESCHEDULE_VERIFY\n"
+            "ACTION: Call get_appointment_tool(confirmation_number) to verify appointment.\n"
+            "Show current appointment details (service, date, time).\n"
+            "IMPORTANT: Track retry_count['reschedule']. After 2 failures:\n"
+            "- Escalate to human: 'Cannot find appointment after multiple attempts'\n"
+            "- Offer: Book new appointment OR continue to POST_ACTION"
+        ),
+        ConversationState.RESCHEDULE_SELECT_DATETIME: (
+            "\nCURRENT STATE: RESCHEDULE_SELECT_DATETIME\n"
+            "ACTION: Ask user for NEW date and time they prefer.\n"
+            "Call get_availability_tool with the service_id from verified appointment.\n"
+            "Show available slots and let user choose."
+        ),
+        ConversationState.RESCHEDULE_CONFIRM: (
+            "\nCURRENT STATE: RESCHEDULE_CONFIRM\n"
+            "ACTION: Show summary of change:\n"
+            "- Current: [old date/time]\n"
+            "- New: [new date/time]\n"
+            "Ask 'Confirm rescheduling to new time?'"
+        ),
+        ConversationState.RESCHEDULE_PROCESS: (
+            "\nCURRENT STATE: RESCHEDULE_PROCESS\n"
+            "ACTION: Call reschedule_appointment_tool(confirmation_number, new_date, new_start_time)"
+        ),
+
         ConversationState.POST_ACTION: (
             "\nCURRENT STATE: POST_ACTION\n"
-            "ACTION: Ask 'Need anything else? I can help you book an appointment or cancel another.'"
+            "ACTION: Ask 'Need anything else? I can help you:\n"
+            "- Book an appointment\n"
+            "- Cancel an appointment\n"
+            "- Reschedule an appointment'"
         ),
     }
 

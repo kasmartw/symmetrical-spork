@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from src.agent import create_graph
 from src.state import ConversationState
-from src.intent import ExitIntentDetector, CancellationIntentDetector
+from src.intent import ExitIntentDetector, CancellationIntentDetector, ReschedulingIntentDetector
 
 # Load environment
 load_dotenv()
@@ -73,9 +73,10 @@ def main():
         print(f"❌ Error creating graph: {e}")
         sys.exit(1)
 
-    # Initialize intent detectors (v1.2)
+    # Initialize intent detectors (v1.2, v1.3)
     exit_detector = ExitIntentDetector()
     cancellation_detector = CancellationIntentDetector()
+    rescheduling_detector = ReschedulingIntentDetector()  # v1.3
 
     # Initialize state
     thread_id = "cli-session-001"
@@ -102,13 +103,19 @@ def main():
             if not user_input:
                 continue
 
-            # Check for cancellation intent FIRST (v1.2 - pre-agent routing)
-            if cancellation_detector.is_cancellation_intent(user_input):
+            # Check for rescheduling intent FIRST (v1.3 - most specific)
+            if rescheduling_detector.is_rescheduling_intent(user_input):
+                # Switch to rescheduling flow
+                state["current_state"] = ConversationState.RESCHEDULE_ASK_CONFIRMATION
+                print("🔄 [Switching to rescheduling flow...]")
+
+            # Check for cancellation intent SECOND (v1.2)
+            elif cancellation_detector.is_cancellation_intent(user_input):
                 # Switch to cancellation flow
                 state["current_state"] = ConversationState.CANCEL_ASK_CONFIRMATION
                 print("🔄 [Switching to cancellation flow...]")
 
-            # Check for exit intent AFTER cancellation (avoid conflicts)
+            # Check for exit intent THIRD (avoid conflicts)
             elif exit_detector.is_exit_intent(user_input):
                 print("\n🤖 Agent: ¡Entiendo! Gracias por tu tiempo. ¡Que tengas un excelente día! 👋\n")
                 conversation_active = False
