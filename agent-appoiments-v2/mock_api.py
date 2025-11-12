@@ -1,6 +1,11 @@
-"""
-Mock API for appointment booking system.
-Flask server with endpoints for services, availability, and appointments.
+"""Mock API for appointment booking system.
+
+Flask server with realistic endpoints for:
+- Services listing
+- Availability checking
+- Appointment creation
+
+Run with: python mock_api.py
 """
 
 from flask import Flask, request, jsonify
@@ -8,7 +13,7 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 import random
 import re
-import config
+from src import config
 
 app = Flask(__name__)
 CORS(app)
@@ -19,7 +24,15 @@ appointment_counter = 1000
 
 
 def generate_time_slots(service_id, date_from=None):
-    """Generate available time slots based on operating hours."""
+    """Generate available time slots based on operating hours.
+
+    Args:
+        service_id: Service ID to generate slots for
+        date_from: Start date (YYYY-MM-DD format), defaults to today
+
+    Returns:
+        List of available time slots with date, start_time, end_time
+    """
     slots = []
 
     # Get service duration
@@ -32,11 +45,11 @@ def generate_time_slots(service_id, date_from=None):
     if date_from:
         try:
             start_date = datetime.strptime(date_from, "%Y-%m-%d")
-        except:
+        except ValueError:
             pass
 
-    # Generate slots for next 7 days
-    for day_offset in range(7):
+    # Generate slots for next 14 days (2 weeks)
+    for day_offset in range(14):
         current_date = start_date + timedelta(days=day_offset)
         day_name = current_date.strftime("%A").lower()
 
@@ -52,9 +65,26 @@ def generate_time_slots(service_id, date_from=None):
         start_time = datetime.strptime(config.OPERATING_HOURS["start_time"], "%H:%M")
         end_time = datetime.strptime(config.OPERATING_HOURS["end_time"], "%H:%M")
 
+        # Lunch break
+        lunch_start = datetime.strptime(
+            config.OPERATING_HOURS.get("lunch_break", {}).get("start", "13:00"),
+            "%H:%M"
+        )
+        lunch_end = datetime.strptime(
+            config.OPERATING_HOURS.get("lunch_break", {}).get("end", "14:00"),
+            "%H:%M"
+        )
+
         # Generate time slots
         current_time = start_time
         while current_time < end_time:
+            # Skip lunch break
+            if lunch_start <= current_time < lunch_end:
+                current_time += timedelta(
+                    minutes=config.OPERATING_HOURS["slot_duration_minutes"]
+                )
+                continue
+
             slot_datetime = current_date.replace(
                 hour=current_time.hour,
                 minute=current_time.minute
@@ -62,8 +92,8 @@ def generate_time_slots(service_id, date_from=None):
 
             # Skip past times for today
             if slot_datetime > datetime.now():
-                # Simulate 70% availability (30% randomly booked)
-                is_available = random.random() < 0.7
+                # Simulate 75% availability (25% randomly booked)
+                is_available = random.random() < 0.75
 
                 # Check if slot is already booked
                 is_booked = any(
@@ -74,7 +104,9 @@ def generate_time_slots(service_id, date_from=None):
                 )
 
                 if is_available and not is_booked:
-                    end_slot_time = current_time + timedelta(minutes=service["duration_minutes"])
+                    end_slot_time = current_time + timedelta(
+                        minutes=service["duration_minutes"]
+                    )
                     slots.append({
                         "date": current_date.strftime("%Y-%m-%d"),
                         "day": current_date.strftime("%A"),
@@ -82,13 +114,15 @@ def generate_time_slots(service_id, date_from=None):
                         "end_time": end_slot_time.strftime("%H:%M")
                     })
 
-            current_time += timedelta(minutes=config.OPERATING_HOURS["slot_duration_minutes"])
+            current_time += timedelta(
+                minutes=config.OPERATING_HOURS["slot_duration_minutes"]
+            )
 
     return slots
 
 
 def validate_email(email):
-    """Validate email format."""
+    """Validate email format using regex."""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
@@ -101,16 +135,20 @@ def validate_phone(phone):
 
 @app.route('/services', methods=['GET'])
 def get_services():
-    """Get list of available services."""
+    """GET /services - List all available services."""
     return jsonify({
         "success": True,
-        "services": config.SERVICES
+        "services": config.SERVICES,
+        "total": len(config.SERVICES)
     })
 
 
 @app.route('/availability', methods=['GET'])
 def get_availability():
-    """Get available time slots for a service."""
+    """GET /availability?service_id=srv-001&date_from=2025-01-15
+
+    Get available time slots for a specific service.
+    """
     service_id = request.args.get('service_id')
     date_from = request.args.get('date_from')
 
@@ -125,7 +163,7 @@ def get_availability():
     if not service:
         return jsonify({
             "success": False,
-            "error": "Service not found"
+            "error": f"Service '{service_id}' not found"
         }), 404
 
     slots = generate_time_slots(service_id, date_from)
@@ -134,19 +172,39 @@ def get_availability():
         "success": True,
         "service": service,
         "available_slots": slots,
-        "total_slots": len(slots)
+        "total_slots": len(slots),
+        "assigned_person": config.ASSIGNED_PERSON,
+        "location": config.LOCATION
     })
 
 
 @app.route('/appointments', methods=['POST'])
 def create_appointment():
-    """Create a new appointment."""
+    """POST /appointments - Create a new appointment.
+
+    Expected JSON body:
+    {
+        "service_id": "srv-001",
+        "date": "2025-01-15",
+        "start_time": "10:00",
+        "client": {
+            "name": "John Doe",
+            "email": "john@example.com",
+            "phone": "555-1234567"
+        }
+    }
+    """
     global appointment_counter
 
     data = request.json
+    if not data:
+        return jsonify({
+            "success": False,
+            "error": "Request body is required"
+        }), 400
 
     # Validate required fields
-    required_fields = ['client', 'service_id', 'date', 'start_time']
+    required_fields = ['service_id', 'date', 'start_time', 'client']
     for field in required_fields:
         if field not in data:
             return jsonify({
@@ -156,17 +214,19 @@ def create_appointment():
 
     # Validate client data
     client = data['client']
-    if not all(k in client for k in ['name', 'email', 'phone']):
-        return jsonify({
-            "success": False,
-            "error": "Client must include name, email, and phone"
-        }), 400
+    required_client_fields = ['name', 'email', 'phone']
+    for field in required_client_fields:
+        if field not in client:
+            return jsonify({
+                "success": False,
+                "error": f"Client missing required field: {field}"
+            }), 400
 
     # Validate email
     if not validate_email(client['email']):
         return jsonify({
             "success": False,
-            "error": "Invalid email format. Please provide a valid email address (e.g., name@example.com)"
+            "error": "Invalid email format. Please provide a valid email (e.g., name@example.com)"
         }), 400
 
     # Validate phone
@@ -181,38 +241,51 @@ def create_appointment():
     if not service:
         return jsonify({
             "success": False,
-            "error": "Service not found"
+            "error": f"Service '{data['service_id']}' not found"
         }), 404
 
-    # Validate date is in future
+    # Validate date format and is in future
     try:
         appointment_date = datetime.strptime(data['date'], "%Y-%m-%d")
         if appointment_date.date() < datetime.now().date():
             return jsonify({
                 "success": False,
-                "error": "Appointment date must be in the future"
+                "error": "Appointment date must be today or in the future"
             }), 400
     except ValueError:
         return jsonify({
             "success": False,
-            "error": "Invalid date format. Please use YYYY-MM-DD"
+            "error": "Invalid date format. Use YYYY-MM-DD"
+        }), 400
+
+    # Validate time format
+    try:
+        datetime.strptime(data['start_time'], "%H:%M")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Invalid time format. Use HH:MM (e.g., 14:30)"
         }), 400
 
     # Check if slot is still available
+    available_slots = generate_time_slots(data['service_id'])
     slot_available = any(
         slot["date"] == data['date'] and
         slot["start_time"] == data['start_time']
-        for slot in generate_time_slots(data['service_id'])
+        for slot in available_slots
     )
 
     if not slot_available:
         # Get alternatives
-        alternatives = generate_time_slots(data['service_id'])[:5]
+        alternatives = [
+            s for s in available_slots
+            if s["date"] >= data['date']
+        ][:5]
         return jsonify({
             "success": False,
             "error": "This time slot is no longer available",
             "alternatives": alternatives
-        }), 400
+        }), 409  # Conflict
 
     # Create appointment
     appointment_counter += 1
@@ -230,8 +303,10 @@ def create_appointment():
         "date": data['date'],
         "start_time": data['start_time'],
         "end_time": end_time.strftime("%H:%M"),
+        "duration_minutes": service['duration_minutes'],
         "assigned_person": config.ASSIGNED_PERSON,
         "location": config.LOCATION,
+        "status": "confirmed",
         "created_at": datetime.now().isoformat()
     }
 
@@ -240,13 +315,13 @@ def create_appointment():
     return jsonify({
         "success": True,
         "appointment": appointment,
-        "message": f"Appointment created successfully! Confirmation number: {confirmation_number}"
+        "message": f"Appointment confirmed! Confirmation number: {confirmation_number}"
     }), 201
 
 
 @app.route('/appointments/<confirmation_number>', methods=['GET'])
 def get_appointment(confirmation_number):
-    """Get appointment details by confirmation number."""
+    """GET /appointments/APPT-1001 - Get appointment by confirmation number."""
     appointment = next(
         (apt for apt in appointments if apt["confirmation_number"] == confirmation_number),
         None
@@ -255,7 +330,7 @@ def get_appointment(confirmation_number):
     if not appointment:
         return jsonify({
             "success": False,
-            "error": "Appointment not found"
+            "error": f"Appointment '{confirmation_number}' not found"
         }), 404
 
     return jsonify({
@@ -264,27 +339,60 @@ def get_appointment(confirmation_number):
     })
 
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint."""
+@app.route('/appointments', methods=['GET'])
+def list_appointments():
+    """GET /appointments - List all appointments (for debugging)."""
     return jsonify({
         "success": True,
-        "status": "healthy",
-        "total_appointments": len(appointments)
+        "appointments": appointments,
+        "total": len(appointments)
     })
 
 
-if __name__ == '__main__':
-    print("🚀 Mock API Server starting...")
-    print(f"📍 Running on http://localhost:{config.MOCK_API_PORT}")
-    print(f"📅 Available services: {len(config.SERVICES)}")
-    print(f"🏥 Assigned person: {config.ASSIGNED_PERSON['name']}")
-    print(f"📍 Location: {config.LOCATION['name']}")
-    print("\nEndpoints:")
-    print("  GET  /services")
-    print("  GET  /availability?service_id=srv-001")
-    print("  POST /appointments")
-    print("  GET  /health")
-    print("\n✅ Server ready!")
+@app.route('/health', methods=['GET'])
+def health_check():
+    """GET /health - Health check endpoint."""
+    return jsonify({
+        "success": True,
+        "status": "healthy",
+        "total_appointments": len(appointments),
+        "timestamp": datetime.now().isoformat()
+    })
 
-    app.run(debug=True, port=config.MOCK_API_PORT, host='0.0.0.0')
+
+def print_startup_info():
+    """Print server startup information."""
+    print("=" * 70)
+    print("🚀 MOCK API SERVER")
+    print("=" * 70)
+    print(f"\n📍 Server: http://localhost:{config.MOCK_API_PORT}")
+    print(f"📅 Services: {len(config.SERVICES)}")
+    for service in config.SERVICES:
+        print(f"   - {service['name']} ({service['duration_minutes']} min)")
+    print(f"\n🏥 Provider: {config.ASSIGNED_PERSON['name']}")
+    print(f"📍 Location: {config.LOCATION['name']}")
+    print(f"   Address: {config.LOCATION['address']}")
+    print(f"\n⏰ Operating Hours:")
+    print(f"   Days: {', '.join(config.OPERATING_HOURS['days']).title()}")
+    print(f"   Time: {config.OPERATING_HOURS['start_time']} - {config.OPERATING_HOURS['end_time']}")
+    print(f"   Slots: {config.OPERATING_HOURS['slot_duration_minutes']} minutes each")
+
+    print("\n📡 Endpoints:")
+    print("   GET  /services                     - List services")
+    print("   GET  /availability?service_id=...  - Get time slots")
+    print("   POST /appointments                 - Create appointment")
+    print("   GET  /appointments/<conf_num>      - Get appointment")
+    print("   GET  /appointments                 - List all (debug)")
+    print("   GET  /health                       - Health check")
+
+    print("\n✅ Server ready! Waiting for requests...")
+    print("=" * 70)
+
+
+if __name__ == '__main__':
+    print_startup_info()
+    app.run(
+        debug=True,
+        port=config.MOCK_API_PORT,
+        host='0.0.0.0'
+    )

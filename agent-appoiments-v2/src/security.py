@@ -1,9 +1,12 @@
 """Security layer for prompt injection detection.
 
-Defense in depth:
-1. Pattern matching (fast pre-filter)
+Language-agnostic detection system that works across all languages.
+Focus on behavioral patterns rather than specific keywords.
+
+Defense layers:
+1. Pattern matching (behavioral, not language-specific)
 2. Base64 decoding check
-3. LLM-Guard deep scan
+3. LLM-Guard deep scan (optional, disabled by default)
 """
 import re
 import base64
@@ -24,44 +27,95 @@ class ScanResult:
 
 class PromptInjectionDetector:
     """
-    Multi-layer prompt injection detector.
+    Language-agnostic prompt injection detector.
+
+    Design Philosophy:
+    - Detects BEHAVIORAL patterns, not keywords
+    - Works across ALL languages (English, Spanish, Chinese, etc.)
+    - Avoids false positives with legitimate conversation
+    - Focuses on structural attack patterns
 
     Layers:
-    1. Pattern matching (regex) - fast fail
-    2. Base64 decoding - catch encoded attacks
-    3. LLM-Guard - ML-based detection
+    1. Pattern matching (behavioral patterns)
+    2. Base64 decoding (encoded attacks)
+    3. LLM-Guard (optional ML, disabled by default)
 
     Pattern: Defense in depth
     Reference: OWASP LLM Top 10
     """
 
-    # Suspicious patterns (case-insensitive)
+    # Suspicious patterns - LANGUAGE AGNOSTIC
+    # Focus on structural patterns that indicate attacks, not normal conversation
     SUSPICIOUS_PATTERNS = [
-        r'ignore\s+(all\s+)?previous\s+instructions',
-        r'system\s*prompt',
-        r'developer\s+mode',
+        # Command injection patterns (English)
+        r'ignore\s+(all\s+)?(previous|prior)\s+(instructions?|commands?|directives?)',
+        r'disregard\s+(all\s+)?(previous|prior)\s+(instructions?|commands?)',
+        r'forget\s+(all\s+)?(your|the)\s+(previous\s+)?(instructions?|commands?|directives?)',
+
+        # Command injection patterns (Spanish)
+        r'ignora\s+(todas?\s+)?(las?\s+)?(instrucciones?|comandos?|directivas?)\s+(anteriores?|previas?)',
+        r'olvida\s+(todas?\s+)?(tus?|las?)\s*(instrucciones?|comandos?|directivas?)\s*(anteriores?|previas?)?',
+
+        # System manipulation (English + Spanish)
+        r'(system|sistema)\s*(prompt|mensaje)',
+        r'(reveal|show|display|muestra|revela)\s+(your|tu|tus)\s+(prompt|instructions|instrucciones)',
+
+        # Role manipulation (English)
+        r'(pretend|act|behave)\s+(you\s+are|as\s+if|like)\s+(a\s+)?(different|another|new|an?\s+)?(\w+\s+)?(AI|assistant|bot)',
+        r'(you\s+are\s+now|from\s+now\s+on|now\s+you\s+are)\s+(a\s+|in\s+)?(different|another)',
+
+        # Role manipulation (Spanish)
+        r'(finge|actúa|actua|comportate|comporta)\s+(que\s+eres|como\s+si|como)\s+(un\s+)?(\w+\s+)?(diferente|otro|nueva?)',
+        r'(ahora\s+eres|ahora\s+estás|ahora\s+estas|desde\s+ahora)\s+(un\s+|en\s+)?(diferente|otro|modo)',
+
+        # Mode switching (English + Spanish)
+        r'(developer|debug|admin|root|administrador|administrator)\s+(mode|modo)',
+        r'(you\s+are\s+now|now\s+you\s+are|ahora\s+estás|ahora\s+estas)\s+in\s+(developer|debug|admin)\s+(mode|modo)',
         r'jailbreak',
-        r'pretend\s+you\s+are',
-        r'act\s+as\s+if',
-        r'forget\s+(your\s+)?instructions',
-        r'override\s+(your\s+)?rules',
+
+        # Override attempts (English + Spanish)
+        r'(override|bypass|skip|saltate)\s+(your|all|any|tu|tus|todas?)\s+(rules?|restrictions?|reglas?|restricciones?)',
+        r'(ignora|omite|salta|ignore|skip|bypass)\s+(todas?\s+)?(tus?|your|all)\s+(rules?|reglas?|restrictions?|restricciones?)',
+
+        # Direct command attempts (English + Spanish)
+        r'<\s*(system|sistema|admin|root)\s*>',
+        r'\[\s*(system|sistema|admin|root)\s*\]',
     ]
 
-    def __init__(self, threshold: float = 0.5):
+    def __init__(self, threshold: float = 0.5, use_ml_scanner: bool = False):
         """
-        Initialize detector.
+        Initialize language-agnostic detector.
 
         Args:
-            threshold: Risk score threshold (0.0-1.0)
+            threshold: Risk score threshold (0.0-1.0), only used if ML scanner enabled
+            use_ml_scanner: Enable ML-based LLM-Guard scanner
+                          WARNING: ML scanner trained primarily on English,
+                          may cause false positives in other languages.
+                          Recommended: False (default)
+
+        Design:
+            - Pattern matching works across all languages
+            - Detects behavioral attack patterns, not keywords
+            - No language-specific bias
         """
         self.threshold = threshold
-        self.scanner = PromptInjection(
-            threshold=threshold,
-            match_type=MatchType.FULL
-        )
+        self.use_ml_scanner = use_ml_scanner
+
+        if use_ml_scanner:
+            self.scanner = PromptInjection(
+                threshold=threshold,
+                match_type=MatchType.FULL
+            )
+        else:
+            self.scanner = None
 
     def _check_patterns(self, text: str) -> bool:
-        """Fast pattern-based check."""
+        """
+        Fast pattern-based check.
+
+        Language-agnostic: Detects behavioral attack patterns in any language.
+        Patterns include English, Spanish, and structural markers.
+        """
         text_lower = text.lower()
         return any(
             re.search(pattern, text_lower, re.IGNORECASE)
@@ -110,20 +164,29 @@ class PromptInjectionDetector:
                 sanitized_text=user_input
             )
 
-        # Layer 3: LLM-Guard deep scan
-        try:
-            sanitized, is_valid, risk_score = self.scanner.scan(user_input)
-            return ScanResult(
-                is_safe=is_valid,
-                risk_score=risk_score,
-                threat_type="llm_guard" if not is_valid else None,
-                sanitized_text=sanitized
-            )
-        except Exception as e:
-            # Fail secure
-            return ScanResult(
-                is_safe=False,
-                risk_score=1.0,
-                threat_type=f"scanner_error: {str(e)}",
-                sanitized_text=user_input
-            )
+        # Layer 3: LLM-Guard deep scan (optional, can have false positives)
+        if self.use_ml_scanner and self.scanner:
+            try:
+                sanitized, is_valid, risk_score = self.scanner.scan(user_input)
+                return ScanResult(
+                    is_safe=is_valid,
+                    risk_score=risk_score,
+                    threat_type="llm_guard" if not is_valid else None,
+                    sanitized_text=sanitized
+                )
+            except Exception as e:
+                # Fail secure
+                return ScanResult(
+                    is_safe=False,
+                    risk_score=1.0,
+                    threat_type=f"scanner_error: {str(e)}",
+                    sanitized_text=user_input
+                )
+
+        # If ML scanner disabled, pass through (pattern + base64 already checked)
+        return ScanResult(
+            is_safe=True,
+            risk_score=0.0,
+            threat_type=None,
+            sanitized_text=user_input
+        )

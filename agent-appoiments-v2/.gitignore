@@ -1,0 +1,305 @@
+# ============================================================================
+# .gitignore for Agent Appointments v2 (Python + LangGraph)
+# ============================================================================
+
+# ============================================================================
+# SECRETS & ENVIRONMENT - NEVER COMMIT THESE!
+# ============================================================================
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+credentials.json
+
+# ============================================================================
+# PYTHON
+# ============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff (if used later):
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff (for mock_api.py):
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# ============================================================================
+# IDEs & EDITORS
+# ============================================================================
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ============================================================================
+# OPERATING SYSTEMS
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# ============================================================================
+# LANGCHAIN / LANGGRAPH
+# ============================================================================
+# LangSmith traces (if stored locally)
+traces/
+langsmith_traces/
+
+# Checkpointer data (if using file-based)
+checkpoints/
+*.checkpoint
+
+# LLM-Guard models cache
+.llm_guard_cache/
+models/
+
+# ============================================================================
+# DATABASE
+# ============================================================================
+# SQLite
+*.sqlite
+*.sqlite3
+*.db
+
+# PostgreSQL
+*.sql
+*.dump
+
+# ============================================================================
+# LOGS & TEMPORARY FILES
+# ============================================================================
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+logs/
+log/
+temp/
+tmp/
+
+# ============================================================================
+# PROJECT SPECIFIC
+# ============================================================================
+# Mock API data (if persisted to file)
+mock_data/
+api_data.json
+
+# Test outputs
+test_output/
+test_results/
+
+# Profiling data
+*.prof
+*.lprof
+
+# Benchmark results
+benchmarks/
+
+# Generated reports
+reports/
+*.html.report
+
+# ============================================================================
+# DOCUMENTATION BUILD
+# ============================================================================
+docs/_build/
+docs/.doctrees/
+
+# ============================================================================
+# MISC
+# ============================================================================
+# Archives
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Certificates
+*.crt
+*.der
+*.pfx
+
+# Node modules (if using any JS tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ============================================================================
+# KEEP THESE FILES (exceptions)
+# ============================================================================
+# Keep .env.example (template for environment variables)
+!.env.example
+
+# Keep .gitkeep files in empty directories
+!.gitkeep
+
+# Keep specific configuration files if needed
+!pytest.ini
+!pyproject.toml

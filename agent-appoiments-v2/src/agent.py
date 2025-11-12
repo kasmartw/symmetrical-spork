@@ -17,19 +17,29 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 
 from src.state import AppointmentState, ConversationState
-from src.tools import validate_email_tool, validate_phone_tool
+from src.tools import (
+    validate_email_tool,
+    validate_phone_tool,
+    get_services_tool,
+    get_availability_tool,
+    create_appointment_tool
+)
 from src.security import PromptInjectionDetector
 
 # Load environment
 load_dotenv()
 
-# Security
-detector = PromptInjectionDetector(threshold=0.5)
+# Security (use_ml_scanner=False to avoid false positives with Spanish)
+# Pattern matching and base64 checks still active
+detector = PromptInjectionDetector(threshold=0.9, use_ml_scanner=False)
 
 # Tools list
 tools = [
+    get_services_tool,
+    get_availability_tool,
     validate_email_tool,
     validate_phone_tool,
+    create_appointment_tool,
 ]
 
 # LLM with tools bound
@@ -42,31 +52,107 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 def build_system_prompt(state: AppointmentState) -> str:
-    """Build context-aware system prompt."""
+    """Build context-aware system prompt with complete booking flow."""
     current = state["current_state"]
 
-    base = """You are a friendly appointment booking assistant.
+    base = """You are a friendly appointment booking assistant for Downtown Medical Center.
+
+CONVERSATION FLOW (follow this exact order):
+1. GREETING - Welcome user and call get_services_tool to show available services
+2. COLLECT_SERVICE - User selects service, then call get_availability_tool
+3. COLLECT_DATE - User chooses a date from available slots
+4. COLLECT_TIME - User chooses a time from available slots
+5. COLLECT_NAME - Ask for user's full name
+6. COLLECT_EMAIL - Ask for email and call validate_email_tool
+7. COLLECT_PHONE - Ask for phone and call validate_phone_tool
+8. SHOW_SUMMARY - Present complete summary for confirmation
+9. CONFIRM - Wait for user to confirm (yes/no)
+10. CREATE_APPOINTMENT - Call create_appointment_tool with all data
+11. COMPLETE - Show confirmation number and thank user
 
 RULES:
-- Ask ONE question at a time
-- Follow the exact state sequence
-- ALWAYS validate email/phone using tools
-- Be friendly and professional
+✅ Ask ONE question at a time
+✅ ALWAYS use get_services_tool first to show services
+✅ ALWAYS use get_availability_tool after service selection
+✅ ALWAYS validate email with validate_email_tool
+✅ ALWAYS validate phone with validate_phone_tool
+✅ ALWAYS show summary before confirmation
+✅ Only create appointment after user confirms "yes"
+✅ Be friendly and professional
+
+AVAILABLE TOOLS:
+- get_services_tool() - Get list of services (use at start)
+- get_availability_tool(service_id, date_from) - Get time slots
+- validate_email_tool(email) - Validate email format
+- validate_phone_tool(phone) - Validate phone number
+- create_appointment_tool(service_id, date, start_time, name, email, phone)
 """
 
     state_prompts = {
+        ConversationState.COLLECT_SERVICE: (
+            "\nCURRENT STATE: COLLECT_SERVICE\n"
+            "ACTION: If not done yet, call get_services_tool() to show available services.\n"
+            "Then ask user which service they want."
+        ),
+        ConversationState.SHOW_AVAILABILITY: (
+            "\nCURRENT STATE: SHOW_AVAILABILITY\n"
+            "ACTION: Call get_availability_tool with the selected service_id.\n"
+            "Show user the available time slots."
+        ),
+        ConversationState.COLLECT_DATE: (
+            "\nCURRENT STATE: COLLECT_DATE\n"
+            "ACTION: Ask user to choose a date from the available slots shown."
+        ),
+        ConversationState.COLLECT_TIME: (
+            "\nCURRENT STATE: COLLECT_TIME\n"
+            "ACTION: Ask user to choose a time from the available slots for their selected date."
+        ),
+        ConversationState.COLLECT_NAME: (
+            "\nCURRENT STATE: COLLECT_NAME\n"
+            "ACTION: Ask for user's full name."
+        ),
         ConversationState.COLLECT_EMAIL: (
-            "CURRENT: Collect email.\n"
-            "You MUST call validate_email_tool before accepting."
+            "\nCURRENT STATE: COLLECT_EMAIL\n"
+            "ACTION: Ask for email, then MUST call validate_email_tool(email) before proceeding."
         ),
         ConversationState.COLLECT_PHONE: (
-            "CURRENT: Collect phone.\n"
-            "You MUST call validate_phone_tool before accepting."
+            "\nCURRENT STATE: COLLECT_PHONE\n"
+            "ACTION: Ask for phone, then MUST call validate_phone_tool(phone) before proceeding."
+        ),
+        ConversationState.SHOW_SUMMARY: (
+            "\nCURRENT STATE: SHOW_SUMMARY\n"
+            "ACTION: Show complete summary with:\n"
+            "- Service name\n"
+            "- Date and time\n"
+            "- Client name, email, phone\n"
+            "- Provider and location\n"
+            "Ask user to confirm (yes/no)."
+        ),
+        ConversationState.CONFIRM: (
+            "\nCURRENT STATE: CONFIRM\n"
+            "ACTION: Wait for user confirmation (yes/no).\n"
+            "If yes → proceed to create\n"
+            "If no → ask what to change"
+        ),
+        ConversationState.CREATE_APPOINTMENT: (
+            "\nCURRENT STATE: CREATE_APPOINTMENT\n"
+            "ACTION: Call create_appointment_tool with all collected data:\n"
+            "- service_id\n"
+            "- date (YYYY-MM-DD)\n"
+            "- start_time (HH:MM)\n"
+            "- client_name\n"
+            "- client_email\n"
+            "- client_phone"
+        ),
+        ConversationState.COMPLETE: (
+            "\nCURRENT STATE: COMPLETE\n"
+            "ACTION: Show confirmation number and thank user.\n"
+            "Wish them a great day!"
         ),
     }
 
-    instruction = state_prompts.get(current, f"CURRENT: {current.value}")
-    return base + "\n" + instruction
+    instruction = state_prompts.get(current, f"\nCURRENT STATE: {current.value}")
+    return base + instruction
 
 
 def agent_node(state: AppointmentState) -> dict[str, Any]:
