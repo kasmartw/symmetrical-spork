@@ -25,9 +25,13 @@ from src.tools import (
     create_appointment_tool
 )
 from src.security import PromptInjectionDetector
+from src.tracing import setup_langsmith_tracing
 
 # Load environment
 load_dotenv()
+
+# Setup LangSmith tracing (v1.2)
+setup_langsmith_tracing()
 
 # Security (use_ml_scanner=False to avoid false positives with Spanish)
 # Pattern matching and base64 checks still active
