@@ -1,4 +1,4 @@
-# Rescheduling Flow Documentation (v1.3)
+# Rescheduling Flow Documentation (v1.3.1)
 
 ## Overview
 
@@ -40,18 +40,26 @@ RESCHEDULE_PROCESS
 POST_ACTION
 ```
 
-## Retry Logic
+## Security & Retry Logic
 
-**IMPORTANT: Uses confirmation number ONLY (same as cancellation)**
+**SECURITY (v1.3.1): Uses confirmation number ONLY**
 
 - Agent asks for **confirmation number** (e.g., APPT-1234)
-- **NO email, NO phone** - only the confirmation number
+- **NO email, NO phone, NO alternative lookup methods**
+- **Only the confirmation number** is accepted for verification
+- **Prevents unauthorized access:** Without confirmation number, users cannot reschedule others' appointments
+
+**Retry Logic:**
 - **2 attempts** to provide valid confirmation number
 - System **automatically** tracks `retry_count['reschedule']` via `retry_handler` node
 - **After 2 failures:**
   - System **automatically** transitions to POST_ACTION state
-  - Escalation message: "I apologize, I cannot find your appointment after multiple attempts. Let me connect you with a team member who can help."
-  - Offers: Book new appointment OR continue with other actions
+  - **Helpful escalation message** provides:
+    - Guidance on where to find confirmation number (email, SMS)
+    - Suggestion to contact Downtown Medical Center directly
+    - Offer to speak with support team
+    - Option to book a new appointment instead
+  - **User-friendly approach:** Instead of just failing, helps user understand next steps
 
 **Client Information:**
 - Email, phone, name are **automatically preserved** by the API
@@ -174,7 +182,7 @@ python chat_cli.py
 | Retry logic | 2 attempts | 2 attempts |
 | Escalation | POST_ACTION | POST_ACTION + new booking offer |
 | Data preservation | Status → cancelled | Preserves all, updates date/time |
-| Tools | 2 (cancel, get_user_appointments) | 2 (get_appointment, reschedule) |
+| Tools | 1 (cancel - v1.3.1 removed email lookup) | 2 (get_appointment, reschedule) |
 
 ## Implementation Summary
 
@@ -186,3 +194,14 @@ python chat_cli.py
 - Chat CLI routing (priority: reschedule → cancel → exit)
 - System prompts for all rescheduling states
 - 39 tests total (32 unit + 7 integration)
+
+**v1.3.1 Security Fix & UX Improvement:**
+- **Removed `get_user_appointments_tool`** from agent tools
+- **Reason:** Prevented unauthorized email-based appointment lookup
+- **Impact:** Users MUST have confirmation number for rescheduling/cancellation
+- **Security benefit:** Attackers cannot use email to discover appointment details
+- **Documentation:** Added explicit security policy to system prompts
+- **UX Enhancement:** Improved escalation message with helpful guidance:
+  - Tells users where to find their confirmation number
+  - Provides clear contact information for support
+  - Offers alternative actions (book new appointment)
