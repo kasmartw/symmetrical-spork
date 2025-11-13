@@ -47,10 +47,17 @@ class TestStateSchema:
 class TestStateTransitions:
     """Test state machine transition guards."""
 
-    def test_valid_transition_collect_service_to_show_availability(self):
-        """Valid: COLLECT_SERVICE → SHOW_AVAILABILITY."""
+    def test_valid_transition_collect_service_to_time_preference(self):
+        """Valid: COLLECT_SERVICE → COLLECT_TIME_PREFERENCE (v1.4)."""
         assert validate_transition(
             ConversationState.COLLECT_SERVICE,
+            ConversationState.COLLECT_TIME_PREFERENCE
+        ) is True
+
+    def test_valid_transition_time_preference_to_show_availability(self):
+        """Valid: COLLECT_TIME_PREFERENCE → SHOW_AVAILABILITY (v1.4)."""
+        assert validate_transition(
+            ConversationState.COLLECT_TIME_PREFERENCE,
             ConversationState.SHOW_AVAILABILITY
         ) is True
 
