@@ -36,3 +36,7 @@ OPERATING_HOURS = {
 # API Configuration
 MOCK_API_BASE_URL = "http://localhost:5000"
 MOCK_API_PORT = 5000
+
+# Availability Configuration
+AVAILABILITY_DAYS_RANGE = 30  # Number of days to fetch availability for
+AVAILABILITY_CACHE_TTL = 1800  # Cache TTL in seconds (30 minutes)

@@ -8,14 +8,19 @@ Best Practices:
 
 v1.2 Updates:
 - Validation tools now use caching for 100x performance improvement
+
+v1.5 Updates:
+- New availability caching strategy with fetch + filter pattern
+- Replaced get_availability_tool with fetch_and_cache + filter_and_show
 """
 import re
 import json
 import requests
+from datetime import datetime
 from typing import Optional
 from langchain_core.tools import tool
 from src import config
-from src.cache import validation_cache
+from src.cache import validation_cache, availability_cache
 
 
 @tool
@@ -117,23 +122,29 @@ def get_services_tool() -> str:
 
 
 @tool
-def get_availability_tool(service_id: str, date_from: Optional[str] = None) -> str:
+def fetch_and_cache_availability_tool(service_id: str) -> str:
     """
-    Get available time slots for a specific service.
+    Fetch 30 days of availability and cache it (v1.5 NEW).
 
-    Use this AFTER the user has selected a service to show available times.
+    This tool fetches availability from the API and stores it in cache.
+    It does NOT show slots to the user - use filter_and_show_availability_tool for that.
+
+    Use this IMMEDIATELY after user selects a service.
 
     Args:
         service_id: Service ID (e.g., 'srv-001')
-        date_from: Optional start date in YYYY-MM-DD format (defaults to today)
 
     Returns:
-        Formatted list of available time slots with dates and times
+        Success message with count of slots found (does not show actual slots)
     """
     try:
-        params = {"service_id": service_id}
-        if date_from:
-            params["date_from"] = date_from
+        # Use datetime.now() to get current date
+        date_from = datetime.now().strftime("%Y-%m-%d")
+
+        params = {
+            "service_id": service_id,
+            "date_from": date_from
+        }
 
         response = requests.get(
             f"{config.MOCK_API_BASE_URL}/availability",
@@ -155,25 +166,138 @@ def get_availability_tool(service_id: str, date_from: Optional[str] = None) -> s
         location = data.get("location", {})
         provider = data.get("assigned_person", {})
 
-        # Format for LLM (show first 10 slots to avoid overwhelming)
-        result = f"[AVAILABILITY] Found {len(slots)} available slots for {service['name']}:\n\n"
-        result += f"Provider: {provider['name']}\n"
-        result += f"Location: {location['name']}, {location['address']}\n\n"
-        result += "Available times (showing first 10):\n"
+        # Cache the results
+        availability_cache.set(
+            service_id=service_id,
+            slots=slots,
+            service=service,
+            location=location,
+            assigned_person=provider
+        )
 
-        for i, slot in enumerate(slots[:10]):
-            result += (
-                f"{i+1}. {slot['day']}, {slot['date']} "
-                f"at {slot['start_time']} - {slot['end_time']}\n"
-            )
-
-        if len(slots) > 10:
-            result += f"\n... and {len(slots) - 10} more slots available"
-
-        return result
+        return (
+            f"[SUCCESS] Fetched and cached {len(slots)} available slots for {service['name']}. "
+            f"Now use filter_and_show_availability_tool to show slots to user."
+        )
 
     except requests.exceptions.RequestException as e:
         return f"[ERROR] Could not connect to API: {str(e)}"
+    except Exception as e:
+        return f"[ERROR] Unexpected error: {str(e)}"
+
+
+@tool
+def filter_and_show_availability_tool(
+    service_id: str,
+    time_preference: str = "any",
+    offset: int = 0
+) -> str:
+    """
+    Filter and show 3 days of availability from cache with time filtering (v1.5 UPDATED).
+
+    This tool reads from cache, FILTERS BY TIME PREFERENCE, and shows the user
+    3 days with availability that match the preference, with max 4 slots per day.
+
+    IMPORTANT: This tool MUST be called with time_preference from user's response.
+
+    Use this AFTER user responds to time preference question.
+
+    Args:
+        service_id: Service ID (e.g., 'srv-001')
+        time_preference: Time preference - "morning", "afternoon", or "any"
+        offset: Number of days to skip (default 0). Increment by 3 to show next batch.
+
+    Returns:
+        Formatted availability for 3 days with max 4 slots per day (filtered by time)
+    """
+    try:
+        # Get from cache
+        cached_data = availability_cache.get(service_id)
+
+        if not cached_data:
+            return (
+                "[ERROR] No cached availability found. "
+                "Please call fetch_and_cache_availability_tool first."
+            )
+
+        slots = cached_data["slots"]
+        service = cached_data["service"]
+        location = cached_data["location"]
+        provider = cached_data["assigned_person"]
+
+        if not slots:
+            return "[ERROR] No available slots found"
+
+        # STEP 1: FILTER BY TIME PREFERENCE (CRITICAL!)
+        filtered_slots = []
+        if time_preference == "morning":
+            # Morning: before 12:00 PM
+            for slot in slots:
+                hour = int(slot["start_time"].split(":")[0])
+                if hour < 12:
+                    filtered_slots.append(slot)
+        elif time_preference == "afternoon":
+            # Afternoon: 12:00 PM and after
+            for slot in slots:
+                hour = int(slot["start_time"].split(":")[0])
+                if hour >= 12:
+                    filtered_slots.append(slot)
+        else:
+            # "any" - no filter
+            filtered_slots = slots
+
+        if not filtered_slots:
+            return f"[INFO] No {time_preference} slots available. Would you like to see all times instead?"
+
+        # STEP 2: Group filtered slots by date
+        slots_by_date = {}
+        for slot in filtered_slots:
+            date = slot["date"]
+            if date not in slots_by_date:
+                slots_by_date[date] = []
+            slots_by_date[date].append(slot)
+
+        # Get sorted dates (only dates that have slots after filtering)
+        sorted_dates = sorted(slots_by_date.keys())
+
+        # STEP 3: Apply offset and get next 3 days with availability
+        dates_to_show = sorted_dates[offset:offset + 3]
+
+        if not dates_to_show:
+            return f"[INFO] No more {time_preference} dates available."
+
+        # STEP 4: Format result
+        filter_label = f" ({time_preference} times)" if time_preference != "any" else ""
+        result = f"[AVAILABILITY] Available times for {service['name']}{filter_label}:\n\n"
+        result += f"Provider: {provider['name']}\n"
+        result += f"Location: {location['name']}, {location['address']}\n\n"
+
+        for date in dates_to_show:
+            date_slots = slots_by_date[date][:4]  # Max 4 slots per day
+
+            # Get day name from first slot
+            day_name = date_slots[0]["day"]
+
+            result += f"\n📅 {day_name}, {date}:\n"
+            for i, slot in enumerate(date_slots):
+                # Convert to 12-hour format
+                start_time_24 = datetime.strptime(slot["start_time"], "%H:%M")
+                end_time_24 = datetime.strptime(slot["end_time"], "%H:%M")
+                start_time_12 = start_time_24.strftime("%I:%M %p").lstrip("0")
+                end_time_12 = end_time_24.strftime("%I:%M %p").lstrip("0")
+
+                result += f"  {i+1}. {start_time_12} - {end_time_12}\n"
+
+        # Check if there are more dates available
+        remaining_dates = len(sorted_dates) - (offset + len(dates_to_show))
+        if remaining_dates > 0:
+            result += f"\n💡 {remaining_dates} more days available with {time_preference} slots. "
+            result += f"To see more, call this tool again with offset={offset + 3}"
+        else:
+            result += f"\n✅ These are all available {time_preference} dates."
+
+        return result
+
     except Exception as e:
         return f"[ERROR] Unexpected error: {str(e)}"
 

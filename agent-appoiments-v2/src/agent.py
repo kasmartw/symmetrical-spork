@@ -21,7 +21,8 @@ from src.tools import (
     validate_email_tool,
     validate_phone_tool,
     get_services_tool,
-    get_availability_tool,
+    fetch_and_cache_availability_tool,  # v1.5
+    filter_and_show_availability_tool,  # v1.5
     create_appointment_tool
 )
 from src.tools_appointment_mgmt import (
@@ -30,7 +31,6 @@ from src.tools_appointment_mgmt import (
     get_appointment_tool,  # v1.3
     reschedule_appointment_tool,  # v1.3
 )
-from src.availability import TimeFilter, TimeOfDay  # v1.4
 from src.security import PromptInjectionDetector
 from src.tracing import setup_langsmith_tracing
 
@@ -48,7 +48,8 @@ detector = PromptInjectionDetector(threshold=0.9, use_ml_scanner=False)
 tools = [
     # Booking tools
     get_services_tool,
-    get_availability_tool,
+    fetch_and_cache_availability_tool,  # v1.5: New caching strategy
+    filter_and_show_availability_tool,  # v1.5: New filtering strategy
     validate_email_tool,
     validate_phone_tool,
     create_appointment_tool,
@@ -92,9 +93,10 @@ RULES:
 ✅ Be friendly and professional
 ✅ Validate data before confirming
 
-TOOLS:
+TOOLS (v1.5 - CACHING + TIME FILTERING STRATEGY):
 - get_services_tool() - List services
-- get_availability_tool(service_id, date_from) - View schedules
+- fetch_and_cache_availability_tool(service_id) - Fetch 30 days and cache (NO shows to user)
+- filter_and_show_availability_tool(service_id, time_preference, offset=0) - Filter by time and show 3 days
 - validate_email_tool(email) - Validate email
 - validate_phone_tool(phone) - Validate phone
 - create_appointment_tool(...) - Create appointment
@@ -110,29 +112,48 @@ SECURITY POLICY (v1.3.1):
 
     state_prompts = {
         ConversationState.COLLECT_SERVICE: (
-            "\nCURRENT STATE: COLLECT_SERVICE\n"
+            "\nCURRENT STATE: COLLECT_SERVICE (v1.5 - CORRECTED FLOW)\n"
             "ACTION: If services not yet shown, call get_services_tool() to show available services.\n"
             "Then ask user which service they want.\n"
             "Once user selects a service:\n"
             "1. Store service_id and service_name in collected_data\n"
-            "2. Immediately ask in THE SAME RESPONSE: 'Great! Do you prefer morning appointments (before 12:00 PM) or afternoon appointments (after 12:00 PM)? Or any time works for you?'\n"
-            "Wait for their time preference response before proceeding."
+            "2. IMMEDIATELY call fetch_and_cache_availability_tool(service_id)\n"
+            "   ⚠️ IMPORTANT: This tool ONLY caches - does NOT show anything to user!\n"
+            "3. After cache success, ask: 'Do you prefer morning (before 12 PM), afternoon (after 12 PM), or any time?'\n"
+            "4. Store user's response in collected_data['time_preference']\n"
+            "Wait for user's time preference before proceeding."
         ),
         ConversationState.COLLECT_TIME_PREFERENCE: (
-            "\nCURRENT STATE: COLLECT_TIME_PREFERENCE\n"
-            "ACTION: The user just responded with their time preference.\n"
-            "Understand responses like:\n"
-            "- 'morning', 'mañana', 'temprano', 'antes de mediodía' → store as 'morning'\n"
-            "- 'afternoon', 'tarde', 'después de mediodía' → store as 'afternoon'\n"
-            "- 'any', 'cualquiera', 'me da igual', 'any time' → store as 'any'\n"
+            "\nCURRENT STATE: COLLECT_TIME_PREFERENCE (v1.5 - CRITICAL)\n"
+            "ACTION: User has responded with time preference.\n"
+            "Understand responses:\n"
+            "- 'morning', 'mañana', 'morning', 'antes de mediodía' → 'morning'\n"
+            "- 'afternoon', 'tarde', 'después de mediodía' → 'afternoon'\n"
+            "- 'any', 'cualquiera', 'any time', 'me da igual' → 'any'\n"
+            "\n"
             "Store in collected_data['time_preference'].\n"
-            "Then call get_availability_tool with the service_id to show available slots."
+            "\n"
+            "Then IMMEDIATELY call:\n"
+            "filter_and_show_availability_tool(\n"
+            "  service_id=collected_data['service_id'],\n"
+            "  time_preference=collected_data['time_preference'],\n"
+            "  offset=0\n"
+            ")\n"
+            "\n"
+            "This will FILTER the cached 30 days by time and show first 3 matching days."
         ),
         ConversationState.SHOW_AVAILABILITY: (
-            "\nCURRENT STATE: SHOW_AVAILABILITY\n"
-            "ACTION: Call get_availability_tool with the selected service_id if not already called.\n"
-            "The system will automatically filter results based on time_preference.\n"
-            "Show user the available time slots."
+            "\nCURRENT STATE: SHOW_AVAILABILITY (v1.5 - NAVIGATION)\n"
+            "ACTION: First 3 filtered days have been shown.\n"
+            "If user says 'no me gusta ninguno', 'show more', 'más opciones', 'siguientes':\n"
+            "- Call filter_and_show_availability_tool(\n"
+            "    service_id,\n"
+            "    time_preference=collected_data['time_preference'],\n"
+            "    offset=3\n"
+            "  )\n"
+            "- For subsequent requests: offset=6, 9, 12, etc.\n"
+            "- Filtering is ALWAYS applied based on stored time_preference\n"
+            "- All reads from cache - no new API calls"
         ),
         ConversationState.COLLECT_DATE: (
             "\nCURRENT STATE: COLLECT_DATE\n"
@@ -292,36 +313,6 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
     return {"messages": [response]}
 
 
-def parse_slots_from_response(response: str) -> list:
-    """
-    Parse availability slots from tool response string (v1.4).
-
-    Args:
-        response: Tool response containing [AVAILABILITY] formatted slots
-
-    Returns:
-        List of slot dicts: [{"date": "...", "day": "...", "start_time": "...", "end_time": "..."}]
-    """
-    import re
-
-    slots = []
-
-    # Pattern: "1. Monday, 2025-11-13 at 09:00 - 09:30"
-    pattern = r'(\d+)\.\s+(\w+),\s+([\d-]+)\s+at\s+([\d:]+)\s+-\s+([\d:]+)'
-    matches = re.findall(pattern, response)
-
-    for match in matches:
-        _, day, date, start_time, end_time = match
-        slots.append({
-            "date": date,
-            "day": day,
-            "start_time": start_time,
-            "end_time": end_time
-        })
-
-    return slots
-
-
 def should_continue(state: AppointmentState) -> str:
     """Route to tools or end."""
     messages = state["messages"]
@@ -411,115 +402,6 @@ def retry_handler_node(state: AppointmentState) -> dict[str, Any]:
     return {}
 
 
-def filter_availability_node(state: AppointmentState) -> dict[str, Any]:
-    """
-    Filter availability results based on time preference (v1.4).
-
-    Runs after tools node when:
-    - current_state is SHOW_AVAILABILITY
-    - time_preference is set
-    - last tool call was get_availability_tool
-
-    Returns:
-        Partial state update with filtered availability message
-    """
-    messages = state["messages"]
-    preference = state.get("collected_data", {}).get("time_preference")
-
-    # Only filter if we have preference and preference is not 'any'
-    if not preference or preference == "any":
-        return {}
-
-    if not messages:
-        return {}
-
-    last_msg = messages[-1]
-
-    # Check if this is a tool response from get_availability_tool
-    if not (hasattr(last_msg, 'content') and
-            isinstance(last_msg.content, str) and
-            '[AVAILABILITY]' in last_msg.content):
-        return {}
-
-    # Parse slots from tool response
-    slots = parse_slots_from_response(last_msg.content)
-
-    if not slots:
-        return {}
-
-    # Apply time filter
-    time_filter = TimeFilter()
-    preference_enum = TimeOfDay.MORNING if preference == "morning" else TimeOfDay.AFTERNOON
-
-    filtered_slots = time_filter.filter_by_time_of_day(slots, preference_enum)
-    filtered_slots = time_filter.limit_to_next_days(filtered_slots, max_days=3)
-
-    # Handle no results
-    from langchain_core.messages import ToolMessage
-
-    if not filtered_slots:
-        no_results_msg = (
-            f"[INFO] No {preference} slots available for this service. "
-            f"Would you like to see all available times instead? "
-            f"(You can also change your time preference)"
-        )
-
-        # Get tool_call_id from last message if it's a ToolMessage
-        tool_call_id = getattr(last_msg, 'tool_call_id', 'filter_availability')
-
-        return {
-            "messages": [ToolMessage(
-                content=no_results_msg,
-                tool_call_id=tool_call_id
-            )]
-        }
-
-    # Format filtered results
-    formatted = time_filter.format_slots_grouped(filtered_slots)
-
-    # Add context about filtering
-    filtered_response = (
-        f"[AVAILABILITY] Showing {preference} appointments:\n\n"
-        f"{formatted}\n\n"
-        f"(Filtered for {preference} times. Want to see all times? Just ask!)"
-    )
-
-    # Get tool_call_id from last message
-    tool_call_id = getattr(last_msg, 'tool_call_id', 'filter_availability')
-
-    # Replace last message with filtered version
-    return {
-        "messages": [ToolMessage(
-            content=filtered_response,
-            tool_call_id=tool_call_id
-        )]
-    }
-
-
-def should_filter_availability(state: AppointmentState) -> str:
-    """
-    Route to filter availability or skip (v1.4).
-
-    Returns:
-        "filter" if we should apply time filtering, "skip" otherwise
-    """
-    current = state["current_state"]
-    preference = state.get("collected_data", {}).get("time_preference")
-    messages = state["messages"]
-
-    # Only filter if showing availability with preference set (not 'any')
-    if (current == ConversationState.SHOW_AVAILABILITY and
-        preference and preference != "any" and
-        messages and len(messages) > 0):
-
-        last_msg = messages[-1]
-        # Check if last message contains availability data
-        if (hasattr(last_msg, 'content') and
-            isinstance(last_msg.content, str) and
-            '[AVAILABILITY]' in last_msg.content):
-            return "filter"
-
-    return "skip"
 
 
 def create_graph():
@@ -542,9 +424,8 @@ def create_graph():
     builder.add_node("agent", agent_node)
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("retry_handler", retry_handler_node)  # v1.2, v1.3
-    builder.add_node("filter_availability", filter_availability_node)  # v1.4
 
-    # Edges
+    # Edges (v1.5: Removed filter_availability node and edges)
     builder.add_edge(START, "agent")
     builder.add_conditional_edges(
         "agent",
@@ -554,21 +435,9 @@ def create_graph():
             "end": END,
         }
     )
-    # After tools, check for retry logic
+    # After tools, check for retry logic then return to agent
     builder.add_edge("tools", "retry_handler")
-
-    # After retry_handler, conditionally filter availability (v1.4)
-    builder.add_conditional_edges(
-        "retry_handler",
-        should_filter_availability,
-        {
-            "filter": "filter_availability",
-            "skip": "agent",
-        }
-    )
-
-    # After filtering, return to agent
-    builder.add_edge("filter_availability", "agent")
+    builder.add_edge("retry_handler", "agent")
 
     # Compile with checkpointer (LangGraph 1.0)
     checkpointer = MemorySaver()
@@ -590,9 +459,8 @@ def create_production_graph():
     builder.add_node("agent", agent_node)
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("retry_handler", retry_handler_node)  # v1.2, v1.3
-    builder.add_node("filter_availability", filter_availability_node)  # v1.4
 
-    # Edges
+    # Edges (v1.5: Removed filter_availability node and edges)
     builder.add_edge(START, "agent")
     builder.add_conditional_edges(
         "agent",
@@ -602,21 +470,9 @@ def create_production_graph():
             "end": END,
         }
     )
-    # After tools, check for retry logic
+    # After tools, check for retry logic then return to agent
     builder.add_edge("tools", "retry_handler")
-
-    # After retry_handler, conditionally filter availability (v1.4)
-    builder.add_conditional_edges(
-        "retry_handler",
-        should_filter_availability,
-        {
-            "filter": "filter_availability",
-            "skip": "agent",
-        }
-    )
-
-    # After filtering, return to agent
-    builder.add_edge("filter_availability", "agent")
+    builder.add_edge("retry_handler", "agent")
 
     # Production checkpointer
     if os.getenv("DATABASE_URL"):

@@ -55,8 +55,8 @@ def generate_time_slots(service_id, date_from=None):
         if apt.get("status") != "cancelled"
     }
 
-    # Generate slots for next 7 days (reduced from 14 for better performance)
-    for day_offset in range(7):
+    # Generate slots for next 30 days (configurable in config.py)
+    for day_offset in range(config.AVAILABILITY_DAYS_RANGE):
         current_date = start_date + timedelta(days=day_offset)
         day_name = current_date.strftime("%A").lower()
 

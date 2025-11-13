@@ -24,7 +24,7 @@ class ConversationState(str, Enum):
     """
     # Booking flow states
     COLLECT_SERVICE = "collect_service"
-    COLLECT_TIME_PREFERENCE = "collect_time_preference"  # v1.4
+    COLLECT_TIME_PREFERENCE = "collect_time_preference"  # v1.5: Restaurado
     SHOW_AVAILABILITY = "show_availability"
     COLLECT_DATE = "collect_date"
     COLLECT_TIME = "collect_time"
@@ -62,7 +62,7 @@ class CollectedData(TypedDict, total=False):
     """
     service_id: Optional[str]
     service_name: Optional[str]
-    time_preference: Optional[str]  # "morning", "afternoon", "any" (v1.4)
+    time_preference: Optional[str]  # "morning", "afternoon", "any" (v1.5: Restaurado)
     date: Optional[str]  # ISO format: YYYY-MM-DD
     start_time: Optional[str]  # 24h format: HH:MM
     end_time: Optional[str]
@@ -98,20 +98,20 @@ State = AppointmentState
 # State machine transition map
 # Pattern: Current state → [allowed next states]
 VALID_TRANSITIONS: Dict[ConversationState, list[ConversationState]] = {
-    # Booking flow transitions
+    # Booking flow transitions (v1.5: Restaurado COLLECT_TIME_PREFERENCE)
     ConversationState.COLLECT_SERVICE: [
-        ConversationState.COLLECT_TIME_PREFERENCE,  # v1.4: Ask time preference first
+        ConversationState.COLLECT_TIME_PREFERENCE,  # v1.5: Pregunta preferencia después de cachear
         ConversationState.CANCEL_ASK_CONFIRMATION,  # Allow switch to cancel
         ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # Allow switch to reschedule (v1.3)
     ],
-    ConversationState.COLLECT_TIME_PREFERENCE: [  # v1.4: New state
-        ConversationState.SHOW_AVAILABILITY,
+    ConversationState.COLLECT_TIME_PREFERENCE: [
+        ConversationState.SHOW_AVAILABILITY,  # Filtra y muestra
         ConversationState.CANCEL_ASK_CONFIRMATION,
         ConversationState.RESCHEDULE_ASK_CONFIRMATION,
     ],
     ConversationState.SHOW_AVAILABILITY: [
         ConversationState.COLLECT_DATE,
-        ConversationState.COLLECT_TIME_PREFERENCE,  # v1.4: Allow going back to change preference
+        ConversationState.COLLECT_TIME_PREFERENCE,  # Permite cambiar preferencia
         ConversationState.CANCEL_ASK_CONFIRMATION,
         ConversationState.RESCHEDULE_ASK_CONFIRMATION,  # v1.3
     ],

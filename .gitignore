@@ -1,3 +1,7 @@
 # environment files
 .env
 venv/
+
+# LangGraph runtime files
+.langgraph_api/
+*.pckl
