@@ -3,5 +3,5 @@
   "graphs": {
     "appointment_agent": "./src/agent.py:create_graph"
   },
-  "env": ".env"
+  "env": "../.env"
 }

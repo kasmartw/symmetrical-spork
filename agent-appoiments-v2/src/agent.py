@@ -33,6 +33,7 @@ from src.tools_appointment_mgmt import (
 )
 from src.security import PromptInjectionDetector
 from src.tracing import setup_langsmith_tracing
+from src.token_logger import log_tokens
 
 # Load environment
 load_dotenv()
@@ -341,6 +342,9 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
 
     # Call LLM
     response = llm_with_tools.invoke(full_msgs)
+
+    # Log token usage (debug mode)
+    log_tokens(response, context="Agent Node")
 
     # Initialize state if this is the first interaction (v1.6: Studio compatibility)
     result = {"messages": [response]}
