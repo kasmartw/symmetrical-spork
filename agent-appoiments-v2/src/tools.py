@@ -26,25 +26,8 @@ from src.cache import validation_cache, availability_cache
 @tool
 def validate_email_tool(email: str) -> str:
     """
-    Validate email address format (OPTIMIZED v1.2).
-
-    Performance: < 1ms with cache, < 10ms without.
-    No LLM calls - pure regex validation.
-
-    Checks for:
-    - @ symbol present
-    - Domain with TLD
-    - Valid characters only
-
-    Args:
-        email: Email address to validate
-
-    Returns:
-        Validation result message
-
-    Example:
-        >>> validate_email_tool.invoke({"email": "user@example.com"})
-        "✅ Email 'user@example.com' is valid."
+    Validate email format. Call IMMEDIATELY after user provides email.
+    Returns [VALID] or [INVALID]. If [INVALID], ask user to provide correct email.
     """
     is_valid, message = validation_cache.validate_email(email)
     # Convert emoji-based messages to bracket notation for consistency
@@ -57,19 +40,8 @@ def validate_email_tool(email: str) -> str:
 @tool
 def validate_phone_tool(phone: str) -> str:
     """
-    Validate phone number (OPTIMIZED v1.2).
-
-    Performance: < 1ms with cache, < 10ms without.
-    No LLM calls - pure regex validation.
-
-    Ignores formatting characters (spaces, hyphens, parentheses).
-    Counts only numeric digits.
-
-    Args:
-        phone: Phone number to validate
-
-    Returns:
-        Validation result message
+    Validate phone number (7+ digits). Call IMMEDIATELY after user provides phone.
+    Returns [VALID] or [INVALID]. If [INVALID], ask user to provide correct phone.
     """
     is_valid, message = validation_cache.validate_phone(phone)
     # Convert emoji-based messages to bracket notation for consistency
@@ -82,13 +54,8 @@ def validate_phone_tool(phone: str) -> str:
 @tool
 def get_services_tool() -> str:
     """
-    Get list of available services from the API.
-
-    Use this at the START of the conversation to show available services.
-    No parameters needed.
-
-    Returns:
-        Formatted list of services with IDs, names, and durations
+    Get available services. Call at START of conversation or when user asks "what services?".
+    Returns [SERVICES] list with IDs and names. No parameters needed.
     """
     try:
         response = requests.get(
@@ -124,18 +91,9 @@ def get_services_tool() -> str:
 @tool
 def fetch_and_cache_availability_tool(service_id: str) -> str:
     """
-    Fetch 30 days of availability and cache it (v1.5 NEW).
-
-    This tool fetches availability from the API and stores it in cache.
-    It does NOT show slots to the user - use filter_and_show_availability_tool for that.
-
-    Use this IMMEDIATELY after user selects a service.
-
-    Args:
-        service_id: Service ID (e.g., 'srv-001')
-
-    Returns:
-        Success message with count of slots found (does not show actual slots)
+    Fetch 30 days of availability and cache (BACKGROUND only - does NOT show to user).
+    Call IMMEDIATELY after user selects service, BEFORE asking time preference.
+    Returns [SUCCESS] with count. Then ask time preference and use filter_and_show tool.
     """
     try:
         # Use datetime.now() to get current date
@@ -193,22 +151,10 @@ def filter_and_show_availability_tool(
     offset: int = 0
 ) -> str:
     """
-    Filter and show 3 days of availability from cache with time filtering (v1.5 UPDATED).
-
-    This tool reads from cache, FILTERS BY TIME PREFERENCE, and shows the user
-    3 days with availability that match the preference, with max 4 slots per day.
-
-    IMPORTANT: This tool MUST be called with time_preference from user's response.
-
-    Use this AFTER user responds to time preference question.
-
-    Args:
-        service_id: Service ID (e.g., 'srv-001')
-        time_preference: Time preference - "morning", "afternoon", or "any"
-        offset: Number of days to skip (default 0). Increment by 3 to show next batch.
-
-    Returns:
-        Formatted availability for 3 days with max 4 slots per day (filtered by time)
+    Filter cached slots by time and show 3 days to user. Call AFTER user responds to time preference.
+    time_preference: "morning" (before 12pm), "afternoon" (12pm+), or "any".
+    offset: 0 for first 3 days, 3 for next 3 days, etc.
+    Returns [AVAILABILITY] formatted for user. This is what user sees!
     """
     try:
         # Get from cache
@@ -312,23 +258,9 @@ def create_appointment_tool(
     client_phone: str
 ) -> str:
     """
-    Create an appointment booking.
-
-    IMPORTANT: Call this ONLY AFTER:
-    1. Getting user confirmation
-    2. Validating email with validate_email_tool
-    3. Validating phone with validate_phone_tool
-
-    Args:
-        service_id: Service ID (e.g., 'srv-001')
-        date: Appointment date in YYYY-MM-DD format
-        start_time: Start time in HH:MM format (e.g., '14:30')
-        client_name: Client's full name
-        client_email: Client's email (already validated)
-        client_phone: Client's phone (already validated)
-
-    Returns:
-        Confirmation message with appointment details and confirmation number
+    Create appointment. Call ONLY AFTER user confirms AND email/phone validated.
+    date: YYYY-MM-DD, start_time: HH:MM (24-hour).
+    Returns [SUCCESS] with confirmation number or [ERROR] with alternatives.
     """
     try:
         payload = {
