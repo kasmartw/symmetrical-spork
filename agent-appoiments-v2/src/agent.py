@@ -64,10 +64,13 @@ tools = [
     reschedule_appointment_tool,
 ]
 
-# LLM with tools bound
+# LLM with tools bound (OPTIMIZED v1.7)
 llm = ChatOpenAI(
     model="gpt-4o-mini",
-    temperature=0.7,
+    temperature=0.2,        # Low temperature for consistent, predictable responses
+    max_tokens=200,         # Limit response length (concise answers, not novels)
+    timeout=15,             # Overall operation timeout
+    request_timeout=15,     # Individual request timeout (prevent hanging)
     api_key=os.getenv("OPENAI_API_KEY")
 )
 llm_with_tools = llm.bind_tools(tools)
@@ -75,7 +78,8 @@ llm_with_tools = llm.bind_tools(tools)
 
 def build_system_prompt(state: AppointmentState) -> str:
     """Build context-aware system prompt."""
-    current = state["current_state"]
+    # Handle initialization from Studio (v1.6: Fix for Studio compatibility)
+    current = state.get("current_state", ConversationState.COLLECT_SERVICE)
 
     base = """You are a friendly assistant for booking, cancelling, and rescheduling appointments at Downtown Medical Center.
 
@@ -282,20 +286,48 @@ SECURITY POLICY (v1.3.1):
     return base + instruction
 
 
+def extract_text_from_content(content) -> str:
+    """
+    Extract text from message content (handles both string and multimodal list).
+
+    LangGraph Studio sends multimodal content as list: [{"type": "text", "text": "..."}]
+    Terminal/CLI sends simple string content: "..."
+
+    Args:
+        content: Either str or list of content blocks
+
+    Returns:
+        Extracted text as string
+    """
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list):
+        # Extract text from multimodal blocks
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+        return " ".join(text_parts)
+    return ""
+
+
 def agent_node(state: AppointmentState) -> dict[str, Any]:
     """
     Agent node - calls LLM with security checks.
 
     Pattern: Pure function returning partial state update.
     """
-    messages = state["messages"]
-    current = state["current_state"]
+    messages = state.get("messages", [])
+    # Handle initialization from Studio (v1.6: Fix for Studio compatibility)
+    current = state.get("current_state", ConversationState.COLLECT_SERVICE)
 
     # Security check on last user message
     if messages:
         last_msg = messages[-1]
         if hasattr(last_msg, 'content') and last_msg.content:
-            scan = detector.scan(last_msg.content)
+            # v1.6: Extract text from multimodal content (Studio compatibility)
+            text_content = extract_text_from_content(last_msg.content)
+            scan = detector.scan(text_content)
             if not scan.is_safe:
                 return {
                     "messages": [SystemMessage(
@@ -310,7 +342,15 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
     # Call LLM
     response = llm_with_tools.invoke(full_msgs)
 
-    return {"messages": [response]}
+    # Initialize state if this is the first interaction (v1.6: Studio compatibility)
+    result = {"messages": [response]}
+    if "current_state" not in state:
+        result["current_state"] = ConversationState.COLLECT_SERVICE
+        result["collected_data"] = {}
+        result["available_slots"] = []
+        result["retry_count"] = {}
+
+    return result
 
 
 def should_continue(state: AppointmentState) -> str:
