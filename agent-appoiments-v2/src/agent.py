@@ -540,8 +540,18 @@ def create_graph():
             "end": END,
         }
     )
-    # After tools, check for retry logic then return to agent
-    builder.add_edge("tools", "retry_handler")
+
+    # OPTIMIZACIÓN v1.8: Routing condicional desde tools
+    # - SI current_state es CANCEL_VERIFY o RESCHEDULE_VERIFY → retry_handler
+    # - NO (otros estados) → agent (directo, ahorra ~500ms)
+    builder.add_conditional_edge(
+        "tools",
+        should_use_retry_handler,  # Nueva función de decisión
+        {
+            "retry_handler": "retry_handler",  # Path cuando SÍ necesita retry
+            "agent": "agent"                    # Path cuando NO necesita retry (90%+ casos)
+        }
+    )
     builder.add_edge("retry_handler", "agent")
 
     # Compile with checkpointer (LangGraph 1.0)
@@ -575,8 +585,18 @@ def create_production_graph():
             "end": END,
         }
     )
-    # After tools, check for retry logic then return to agent
-    builder.add_edge("tools", "retry_handler")
+
+    # OPTIMIZACIÓN v1.8: Routing condicional desde tools (same as create_graph)
+    # - SI current_state es CANCEL_VERIFY o RESCHEDULE_VERIFY → retry_handler
+    # - NO (otros estados) → agent (directo, ahorra ~500ms)
+    builder.add_conditional_edge(
+        "tools",
+        should_use_retry_handler,  # Nueva función de decisión
+        {
+            "retry_handler": "retry_handler",  # Path cuando SÍ necesita retry
+            "agent": "agent"                    # Path cuando NO necesita retry (90%+ casos)
+        }
+    )
     builder.add_edge("retry_handler", "agent")
 
     # Production checkpointer
