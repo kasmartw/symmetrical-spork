@@ -7,15 +7,9 @@ from src import config
 @tool
 def cancel_appointment_tool(confirmation_number: str) -> str:
     """
-    Cancel an appointment by confirmation number.
-
-    IMPORTANT: This changes the appointment status to 'cancelled' without deleting it.
-
-    Args:
-        confirmation_number: Appointment confirmation number (e.g., APPT-1234)
-
-    Returns:
-        Cancellation confirmation message
+    Cancel appointment. Call AFTER user confirms cancellation.
+    SECURITY: Only accepts confirmation number (NO email lookup).
+    Returns [SUCCESS] or [ERROR]. System auto-escalates after 2 failures.
     """
     try:
         response = requests.patch(
@@ -88,15 +82,9 @@ def get_user_appointments_tool(email: str) -> str:
 @tool
 def get_appointment_tool(confirmation_number: str) -> str:
     """
-    Get appointment details by confirmation number.
-
-    Use this to verify appointment before rescheduling.
-
-    Args:
-        confirmation_number: Appointment confirmation number (e.g., APPT-1234)
-
-    Returns:
-        Appointment details or error message
+    Get appointment details for rescheduling. Call IMMEDIATELY after user provides confirmation number.
+    SECURITY: Only accepts confirmation number (NO email lookup).
+    Returns [APPOINTMENT] with current details or [ERROR]. System auto-escalates after 2 failures.
     """
     try:
         response = requests.get(
@@ -131,17 +119,10 @@ def reschedule_appointment_tool(
     new_start_time: str
 ) -> str:
     """
-    Reschedule an appointment to new date/time.
-
-    IMPORTANT: Call get_appointment_tool first to verify appointment exists.
-
-    Args:
-        confirmation_number: Appointment confirmation number (e.g., APPT-1234)
-        new_date: New date in YYYY-MM-DD format
-        new_start_time: New start time in HH:MM format (e.g., '14:30')
-
-    Returns:
-        Confirmation message with updated details or error with alternatives
+    Reschedule appointment. Call ONLY AFTER user confirms AND selects new date/time.
+    Client info preserved automatically (NO need to ask again).
+    new_date: YYYY-MM-DD, new_start_time: HH:MM (24-hour).
+    Returns [SUCCESS] with updated details or [ERROR].
     """
     try:
         payload = {
