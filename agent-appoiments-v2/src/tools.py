@@ -12,6 +12,9 @@ v1.2 Updates:
 v1.5 Updates:
 - New availability caching strategy with fetch + filter pattern
 - Replaced get_availability_tool with fetch_and_cache + filter_and_show
+
+v1.7 Updates:
+- HTTP client with retry and connection pooling for resilience
 """
 import re
 import json
@@ -21,6 +24,7 @@ from typing import Optional
 from langchain_core.tools import tool
 from src import config
 from src.cache import validation_cache, availability_cache
+from src.http_client import api_session
 
 
 @tool
@@ -58,7 +62,7 @@ def get_services_tool() -> str:
     Returns [SERVICES] list with IDs and names. No parameters needed.
     """
     try:
-        response = requests.get(
+        response = api_session.get(
             f"{config.MOCK_API_BASE_URL}/services",
             timeout=5
         )
@@ -104,7 +108,7 @@ def fetch_and_cache_availability_tool(service_id: str) -> str:
             "date_from": date_from
         }
 
-        response = requests.get(
+        response = api_session.get(
             f"{config.MOCK_API_BASE_URL}/availability",
             params=params,
             timeout=5
@@ -274,7 +278,7 @@ def create_appointment_tool(
             }
         }
 
-        response = requests.post(
+        response = api_session.post(
             f"{config.MOCK_API_BASE_URL}/appointments",
             json=payload,
             timeout=5

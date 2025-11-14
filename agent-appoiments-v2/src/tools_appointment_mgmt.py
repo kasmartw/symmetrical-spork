@@ -1,7 +1,8 @@
-"""Tools for appointment management: cancellation and rescheduling (v1.2, v1.3)."""
+"""Tools for appointment management: cancellation and rescheduling (v1.2, v1.3, v1.7)."""
 import requests
 from langchain_core.tools import tool
 from src import config
+from src.http_client import api_session
 
 
 @tool
@@ -12,7 +13,7 @@ def cancel_appointment_tool(confirmation_number: str) -> str:
     Returns [SUCCESS] or [ERROR]. System auto-escalates after 2 failures.
     """
     try:
-        response = requests.patch(
+        response = api_session.patch(
             f"{config.MOCK_API_BASE_URL}/appointments/{confirmation_number}",
             timeout=5
         )
@@ -52,7 +53,7 @@ def get_user_appointments_tool(email: str) -> str:
         List of appointments
     """
     try:
-        response = requests.get(
+        response = api_session.get(
             f"{config.MOCK_API_BASE_URL}/appointments",
             params={"email": email},
             timeout=5
@@ -87,7 +88,7 @@ def get_appointment_tool(confirmation_number: str) -> str:
     Returns [APPOINTMENT] with current details or [ERROR]. System auto-escalates after 2 failures.
     """
     try:
-        response = requests.get(
+        response = api_session.get(
             f"{config.MOCK_API_BASE_URL}/appointments/{confirmation_number}",
             timeout=5
         )
@@ -130,7 +131,7 @@ def reschedule_appointment_tool(
             "start_time": new_start_time
         }
 
-        response = requests.put(
+        response = api_session.put(
             f"{config.MOCK_API_BASE_URL}/appointments/{confirmation_number}/reschedule",
             json=payload,
             timeout=5
