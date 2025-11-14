@@ -11,20 +11,24 @@ from typing import List
 
 class ExitIntentDetector:
     """
-    Detect exit/goodbye intents.
+    Detect exit/goodbye intents with contextual understanding.
 
-    Pattern: Pattern matching for common exit phrases.
+    Pattern: Multi-level pattern matching:
+    1. Exact keywords (high confidence)
+    2. Contextual phrases (medium confidence)
+    3. Completion signals (medium confidence)
     """
 
-    EXIT_PATTERNS: List[str] = [
-        # English patterns
+    # Level 1: Exact exit keywords (original patterns)
+    EXIT_KEYWORDS: List[str] = [
+        # English
         r'\b(bye|goodbye|exit|quit)\b',
         r'\bno\s+thanks?\b',
         r'\bnevermind\b',
         r'\bdon\'?t\s+need\b',
         r'\bno\s+longer\b',
         r'\bstop\b',
-        # Spanish patterns
+        # Spanish
         r'\b(adios|adiós|chao|chau)\b',
         r'\b(hasta\s+luego|hasta\s+pronto)\b',
         r'\bno\s+gracias\b',
@@ -36,9 +40,31 @@ class ExitIntentDetector:
         r'\bya\s+no\b',
     ]
 
+    # Level 2: Contextual completion phrases (NEW)
+    COMPLETION_PATTERNS: List[str] = [
+        # "Thanks + something" patterns
+        r'\b(gracias|muchas\s+gracias|thank\s+you|thanks)\s*,?\s*(hasta|bye|adiós|luego|nos\s+vemos)',
+        r'\b(muchas\s+gracias|thank\s+you\s+so\s+much|thanks\s+a\s+lot)\b',
+
+        # "Done/finished" patterns
+        r'\b(perfecto|perfect|ok|listo|ya\s+está)\s*,?\s*(eso\s+es\s+todo|that\'?s\s+(all|it)|nos\s+vemos|ya)\b',
+        r'\bya\s+(terminé|termine|está|esta)\b',
+        r'\b(all\s+done|i\'?m\s+done|that\'?s\s+everything)\b',
+
+        # "That's all" patterns
+        r'\beso\s+es\s+todo\b',
+        r'\bthat\'?s\s+(all|it|everything)\b',
+        r'\bnada\s+más\b',
+        r'\bnothing\s+(else|more)\b',
+    ]
+
     def is_exit_intent(self, message: str) -> bool:
         """
         Check if message expresses exit intent.
+
+        Uses two-level detection:
+        1. Exact keywords (original behavior)
+        2. Contextual completion phrases (NEW)
 
         Args:
             message: User message
@@ -48,10 +74,17 @@ class ExitIntentDetector:
         """
         message_lower = message.lower().strip()
 
-        return any(
-            re.search(pattern, message_lower, re.IGNORECASE)
-            for pattern in self.EXIT_PATTERNS
-        )
+        # Level 1: Check exact keywords
+        if any(re.search(pattern, message_lower, re.IGNORECASE)
+               for pattern in self.EXIT_KEYWORDS):
+            return True
+
+        # Level 2: Check contextual completion patterns
+        if any(re.search(pattern, message_lower, re.IGNORECASE)
+               for pattern in self.COMPLETION_PATTERNS):
+            return True
+
+        return False
 
 
 class CancellationIntentDetector:
