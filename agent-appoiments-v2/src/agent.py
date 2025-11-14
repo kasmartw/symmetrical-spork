@@ -365,13 +365,16 @@ def should_continue(state: AppointmentState) -> str:
 
 def retry_handler_node(state: AppointmentState) -> dict[str, Any]:
     """
-    Handle retry logic after tool execution (v1.2, v1.3).
+    Handle retry logic after tool execution (v1.2, v1.3, v1.7 ENHANCED).
 
     Monitors tool responses and manages retry_count for:
     - Cancellation flow (CANCEL_VERIFY)
     - Rescheduling flow (RESCHEDULE_VERIFY)
 
     After 2 failed attempts, transitions to POST_ACTION with escalation message.
+
+    **v1.7 Enhancement:** Detects error types to determine if retry is appropriate.
+    Only retries on user errors (not found, invalid format), not system errors.
     """
     messages = state["messages"]
     current = state["current_state"]
@@ -387,12 +390,29 @@ def retry_handler_node(state: AppointmentState) -> dict[str, Any]:
 
     last_msg = messages[-1]
 
-    # Look for tool responses with [ERROR]
+    # Look for tool responses with errors
     if hasattr(last_msg, 'content') and isinstance(last_msg.content, str):
         content = last_msg.content
 
-        # Detect error in tool response
-        if '[ERROR]' in content and 'not found' in content.lower():
+        # Classify error type
+        is_user_error = False  # User provided wrong info (retryable)
+        is_system_error = False  # System/API issue (not retryable by user)
+
+        if '[ERROR]' in content:
+            # User errors (retryable)
+            if 'not found' in content.lower():
+                is_user_error = True
+            elif 'invalid' in content.lower() and 'format' in content.lower():
+                is_user_error = True
+
+            # System errors (not retryable by user)
+            elif 'could not connect' in content.lower():
+                is_system_error = True
+            elif 'api' in content.lower() and ('timeout' in content.lower() or 'unavailable' in content.lower()):
+                is_system_error = True
+
+        # Handle user errors (retryable)
+        if is_user_error:
             # Determine flow type
             flow_key = 'cancel' if current == ConversationState.CANCEL_VERIFY else 'reschedule'
 
@@ -438,6 +458,27 @@ def retry_handler_node(state: AppointmentState) -> dict[str, Any]:
             else:
                 # Still have retries left
                 return {"retry_count": retry_count}
+
+        # Handle system errors (immediate escalation, no retry)
+        elif is_system_error:
+            flow_key = 'cancel' if current == ConversationState.CANCEL_VERIFY else 'reschedule'
+
+            system_error_msg = (
+                "I apologize, but I'm experiencing technical difficulties connecting to our system. "
+                "This is not an issue with your information.\n\n"
+                "Please try again in a few moments. "
+                "If the problem persists, please contact Downtown Medical Center directly:\n"
+                "• Phone: (555) 123-4567\n"
+                "• Email: support@downtownmedical.com\n\n"
+                "Would you like to try booking a new appointment instead?"
+            )
+
+            from langchain_core.messages import AIMessage
+            return {
+                "retry_count": retry_count,
+                "current_state": ConversationState.POST_ACTION,
+                "messages": [AIMessage(content=system_error_msg)]
+            }
 
     return {}
 
