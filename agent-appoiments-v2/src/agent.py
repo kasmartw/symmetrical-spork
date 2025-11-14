@@ -544,7 +544,7 @@ def create_graph():
     # OPTIMIZACIÓN v1.8: Routing condicional desde tools
     # - SI current_state es CANCEL_VERIFY o RESCHEDULE_VERIFY → retry_handler
     # - NO (otros estados) → agent (directo, ahorra ~500ms)
-    builder.add_conditional_edge(
+    builder.add_conditional_edges(
         "tools",
         should_use_retry_handler,  # Nueva función de decisión
         {
@@ -589,7 +589,7 @@ def create_production_graph():
     # OPTIMIZACIÓN v1.8: Routing condicional desde tools (same as create_graph)
     # - SI current_state es CANCEL_VERIFY o RESCHEDULE_VERIFY → retry_handler
     # - NO (otros estados) → agent (directo, ahorra ~500ms)
-    builder.add_conditional_edge(
+    builder.add_conditional_edges(
         "tools",
         should_use_retry_handler,  # Nueva función de decisión
         {
