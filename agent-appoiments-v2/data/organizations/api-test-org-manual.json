@@ -1,0 +1,32 @@
+{
+  "org_id": "api-test-org-manual",
+  "org_name": "API Test Clinic Manual",
+  "system_prompt": null,
+  "services": [
+    {
+      "id": "srv-custom-001",
+      "name": "Custom Service",
+      "description": "Org-specific service",
+      "duration_minutes": 45,
+      "price": 125.0,
+      "active": true
+    },
+    {
+      "id": "srv-custom-002",
+      "name": "Inactive Service",
+      "description": "Should not appear",
+      "duration_minutes": 30,
+      "price": 100.0,
+      "active": false
+    }
+  ],
+  "permissions": {
+    "can_book": true,
+    "can_reschedule": true,
+    "can_cancel": true
+  },
+  "promotional_offers": [],
+  "location": null,
+  "assigned_person": null,
+  "operating_hours": null
+}

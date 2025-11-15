@@ -1,0 +1,54 @@
+{
+  "org_id": "550e8400-e29b-41d4-a716-446655440002",
+  "org_name": "Peaceful Mind Therapy Clinic",
+  "system_prompt": "You are a warm, empathetic assistant for Peaceful Mind Therapy Clinic. Speak gently and reassure clients that seeking therapy is a positive step. Always maintain confidentiality and professionalism.",
+  "services": [
+    {
+      "id": "srv-101",
+      "name": "Individual Therapy Session",
+      "description": "One-on-one therapy session with licensed therapist",
+      "duration_minutes": 50,
+      "price": 150.0,
+      "active": true
+    },
+    {
+      "id": "srv-102",
+      "name": "Couples Therapy Session",
+      "description": "Relationship counseling for couples",
+      "duration_minutes": 60,
+      "price": 200.0,
+      "active": true
+    },
+    {
+      "id": "srv-103",
+      "name": "Group Therapy Session",
+      "description": "Small group therapy (max 6 participants)",
+      "duration_minutes": 90,
+      "price": 75.0,
+      "active": false
+    }
+  ],
+  "permissions": {
+    "can_book": true,
+    "can_reschedule": true,
+    "can_cancel": false
+  },
+  "promotional_offers": [],
+  "location": {
+    "name": "Peaceful Mind Therapy Clinic",
+    "address": "456 Oak Avenue, Suite 200",
+    "city": "Riverside",
+    "phone": "555-0200"
+  },
+  "assigned_person": {
+    "name": "Dr. Sarah Williams",
+    "type": "therapist",
+    "specialization": "Clinical Psychology"
+  },
+  "operating_hours": {
+    "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+    "start_time": "10:00",
+    "end_time": "19:00",
+    "slot_duration_minutes": 50
+  }
+}

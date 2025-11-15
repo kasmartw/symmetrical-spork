@@ -1,0 +1,67 @@
+{
+  "org_id": "550e8400-e29b-41d4-a716-446655440001",
+  "org_name": "Sample Medical Center",
+  "system_prompt": null,
+  "services": [
+    {
+      "id": "srv-001",
+      "name": "General Consultation",
+      "description": "Standard medical consultation with our general practitioners",
+      "duration_minutes": 30,
+      "price": 100.0,
+      "active": true
+    },
+    {
+      "id": "srv-002",
+      "name": "Specialist Consultation",
+      "description": "Consultation with medical specialists",
+      "duration_minutes": 60,
+      "price": 200.0,
+      "active": true
+    },
+    {
+      "id": "srv-003",
+      "name": "Follow-up Appointment",
+      "description": "Follow-up visit for existing patients",
+      "duration_minutes": 20,
+      "price": 50.0,
+      "active": true
+    }
+  ],
+  "permissions": {
+    "can_book": true,
+    "can_reschedule": true,
+    "can_cancel": true
+  },
+  "promotional_offers": [
+    {
+      "id": "offer-001",
+      "title": "New Patient Special",
+      "description": "First-time patients get 15% off their first consultation",
+      "metadata": {
+        "discount_percent": 15,
+        "service_id": "srv-001",
+        "valid_from": "2025-01-01",
+        "valid_until": "2025-12-31"
+      },
+      "active": true
+    }
+  ],
+  "location": {
+    "name": "Downtown Medical Center",
+    "address": "123 Main Street",
+    "city": "Springfield",
+    "phone": "555-0100"
+  },
+  "assigned_person": {
+    "name": "Dr. Garcia",
+    "type": "doctor",
+    "specialization": "General Practice"
+  },
+  "operating_hours": {
+    "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+    "start_time": "09:00",
+    "end_time": "18:00",
+    "slot_duration_minutes": 30
+  }
+}
