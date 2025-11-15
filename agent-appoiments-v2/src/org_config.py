@@ -95,8 +95,8 @@ class PromotionalOffer(BaseModel):
 
 class OrganizationConfig(BaseModel):
     """Complete organization configuration."""
-    org_id: str = Field(..., description="Unique organization UUID")
-    org_name: str = Field(..., min_length=1, max_length=200, description="Organization name")
+    org_id: str = Field(..., description="Unique organization ID (provided by client)")
+    org_name: Optional[str] = Field(None, min_length=1, max_length=200, description="Organization name (optional)")
     system_prompt: Optional[str] = Field(
         None,
         max_length=4000,

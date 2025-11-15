@@ -187,13 +187,16 @@ def get_services():
             for s in active_services
         ]
 
-        return jsonify({
+        response_data = {
             "success": True,
             "services": services_list,
             "total": len(services_list),
-            "org_id": org_config.org_id,
-            "org_name": org_config.org_name
-        })
+            "org_id": org_config.org_id
+        }
+        if org_config.org_name:
+            response_data["org_name"] = org_config.org_name
+
+        return jsonify(response_data)
 
     # Default: return config.SERVICES
     return jsonify({

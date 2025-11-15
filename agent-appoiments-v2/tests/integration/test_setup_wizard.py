@@ -6,18 +6,23 @@ from setup_wizard import (
     prompt_yes_no,
     prompt_text,
     prompt_service,
-    generate_org_id,
+    validate_org_id,
     run_setup_wizard
 )
 
 
-def test_generate_org_id():
-    """Test UUID generation."""
-    org_id = generate_org_id()
+def test_validate_org_id():
+    """Test org_id validation."""
+    # Valid IDs
+    assert validate_org_id("clinic-123") is True
+    assert validate_org_id("my_org") is True
+    assert validate_org_id("ORG-2024") is True
 
-    # Should be valid UUID format
-    assert len(org_id) == 36
-    assert org_id.count('-') == 4
+    # Invalid IDs
+    assert validate_org_id("ab") is False  # Too short
+    assert validate_org_id("") is False  # Empty
+    assert validate_org_id("org with spaces") is False  # Spaces
+    assert validate_org_id("org@email") is False  # Special chars
 
 
 @patch('builtins.input')

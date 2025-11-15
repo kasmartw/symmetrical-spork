@@ -74,10 +74,11 @@ def load_and_display_config(
     """
     config = manager.load_config(org_id)
 
-    print_header(f"ORGANIZATION: {config.org_name}")
+    org_display = config.org_name if config.org_name else f"Organization {config.org_id}"
+    print_header(f"ORGANIZATION: {org_display}")
 
     print(f"📋 Organization ID: {config.org_id}")
-    print(f"📛 Name: {config.org_name}")
+    print(f"📛 Name: {config.org_name if config.org_name else '(not provided)'}")
 
     # System prompt
     if config.system_prompt:
@@ -204,7 +205,7 @@ def main():
     config = load_and_display_config(org_id, manager)
 
     print("\n⚠️  VERIFICATION:")
-    print(f"   - Agent will use: {config.org_name}")
+    print(f"   - Agent will use: {config.org_name if config.org_name else config.org_id}")
     print(f"   - System prompt: {'CUSTOM' if config.system_prompt else 'DEFAULT'}")
     print(f"   - Active services: {len(config.get_active_services())}")
     print(f"   - Can reschedule: {'YES' if config.permissions.can_reschedule else 'NO'}")

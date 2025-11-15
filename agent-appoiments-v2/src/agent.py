@@ -672,8 +672,10 @@ def build_system_prompt_for_org(
     base_prompt = org_config.get_effective_system_prompt()
 
     # Add organization context
-    org_context = f"\n\nORGANIZATION: {org_config.org_name}"
-    org_context += f"\nORGANIZATION ID: {org_config.org_id}"
+    org_context = "\n\n"
+    if org_config.org_name:
+        org_context += f"ORGANIZATION: {org_config.org_name}\n"
+    org_context += f"ORGANIZATION ID: {org_config.org_id}"
 
     # Add permissions context
     perms = org_config.permissions

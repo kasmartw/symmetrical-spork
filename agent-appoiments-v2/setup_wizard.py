@@ -22,9 +22,22 @@ from src.org_config import (
 from src.config_manager import ConfigManager
 
 
-def generate_org_id() -> str:
-    """Generate unique organization ID."""
-    return str(uuid.uuid4())
+def validate_org_id(org_id: str) -> bool:
+    """
+    Validate organization ID format.
+
+    Args:
+        org_id: Organization ID to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    # Must be non-empty and reasonable length
+    if not org_id or len(org_id) < 3 or len(org_id) > 100:
+        return False
+    # Must contain only alphanumeric, dash, underscore
+    import re
+    return bool(re.match(r'^[a-zA-Z0-9_-]+$', org_id))
 
 
 def print_header(text: str) -> None:
@@ -221,10 +234,30 @@ def run_setup_wizard() -> OrganizationConfig:
 
     # Step 1: Organization details
     print_header("ORGANIZATION DETAILS")
-    org_id = generate_org_id()
-    print(f"📋 Generated Organization ID: {org_id}\n")
 
-    org_name = prompt_text("Organization name", required=True, max_length=200)
+    print("The Organization ID is provided by the client (your unique identifier).")
+    print("Format: alphanumeric characters, dashes, and underscores only (3-100 chars)\n")
+
+    # Ask for org_id from client
+    while True:
+        org_id = prompt_text("Organization ID", required=True, max_length=100)
+
+        # Validate format
+        if not validate_org_id(org_id):
+            print("❌ Invalid format. Use only letters, numbers, dashes, and underscores (3-100 chars).\n")
+            continue
+
+        # Check if already exists
+        manager = ConfigManager()
+        if manager.config_exists(org_id):
+            print(f"❌ Organization ID '{org_id}' already exists. Please use a different ID.\n")
+            continue
+
+        break
+
+    print(f"✅ Organization ID: {org_id}\n")
+
+    org_name = prompt_text("Organization name (optional, press Enter to skip)", required=False, max_length=200)
 
     # Step 2: System prompt (optional)
     print_header("AGENT PERSONALITY")
@@ -367,7 +400,7 @@ def main():
         # Summary
         print_header("CONFIGURATION SUMMARY")
         print(f"Organization ID: {config.org_id}")
-        print(f"Organization Name: {config.org_name}")
+        print(f"Organization Name: {config.org_name if config.org_name else '(not provided)'}")
         print(f"Custom Prompt: {'Yes' if config.system_prompt else 'No (using default)'}")
         print(f"Services: {len(config.services)} ({len(config.get_active_services())} active)")
         print(f"Permissions: Book={config.permissions.can_book}, "
