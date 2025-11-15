@@ -6,17 +6,20 @@ References:
 - Best Practices by Swarnendu De (2025)
 """
 import os
-from typing import Any
+from typing import Any, List, Optional
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
+from langchain_core.tools import BaseTool
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 
 from src.state import AppointmentState, ConversationState
+from src.org_config import OrganizationConfig, PermissionsConfig
+from src.config_manager import ConfigManager
 from src.tools import (
     validate_email_tool,
     validate_phone_tool,
@@ -611,3 +614,194 @@ def create_production_graph():
     else:
         # Fallback for development
         return builder.compile(checkpointer=MemorySaver())
+
+
+# ============================================================================
+# MULTI-TENANT ORGANIZATION-AWARE AGENT CREATION (v1.5)
+# ============================================================================
+
+def create_tools_for_org(permissions: PermissionsConfig) -> List[BaseTool]:
+    """
+    Create tools list based on organization permissions.
+
+    Args:
+        permissions: Organization permissions configuration
+
+    Returns:
+        List of tools that are permitted for this organization
+    """
+    # Always include these basic tools
+    tools_list = [
+        get_services_tool,
+        fetch_and_cache_availability_tool,  # v1.5
+        filter_and_show_availability_tool,  # v1.5
+        validate_email_tool,
+        validate_phone_tool
+    ]
+
+    # Add tools based on permissions
+    if permissions.can_book:
+        tools_list.append(create_appointment_tool)
+
+    if permissions.can_cancel:
+        tools_list.append(cancel_appointment_tool)
+        tools_list.append(get_appointment_tool)  # Needed for cancel
+
+    if permissions.can_reschedule:
+        tools_list.append(reschedule_appointment_tool)
+        tools_list.append(get_appointment_tool)  # Needed for reschedule
+
+    return tools_list
+
+
+def build_system_prompt_for_org(
+    org_config: OrganizationConfig,
+    state: Optional[AppointmentState] = None
+) -> str:
+    """
+    Build system prompt from organization configuration.
+
+    Args:
+        org_config: Organization configuration
+        state: Current appointment state (optional)
+
+    Returns:
+        Complete system prompt with org-specific settings
+    """
+    # Start with custom or default prompt
+    base_prompt = org_config.get_effective_system_prompt()
+
+    # Add organization context
+    org_context = f"\n\nORGANIZATION: {org_config.org_name}"
+    org_context += f"\nORGANIZATION ID: {org_config.org_id}"
+
+    # Add permissions context
+    perms = org_config.permissions
+    org_context += "\n\nAVAILABLE CAPABILITIES:"
+    org_context += f"\n- Book appointments: {'✅ ENABLED' if perms.can_book else '❌ DISABLED'}"
+    org_context += f"\n- Reschedule appointments: {'✅ ENABLED' if perms.can_reschedule else '❌ DISABLED'}"
+    org_context += f"\n- Cancel appointments: {'✅ ENABLED' if perms.can_cancel else '❌ DISABLED'}"
+
+    # Add disabled action warnings
+    disabled_actions = []
+    if not perms.can_book:
+        disabled_actions.append("booking new appointments")
+    if not perms.can_reschedule:
+        disabled_actions.append("rescheduling appointments")
+    if not perms.can_cancel:
+        disabled_actions.append("canceling appointments")
+
+    if disabled_actions:
+        org_context += "\n\n⚠️  IMPORTANT: The following actions are DISABLED:"
+        for action in disabled_actions:
+            org_context += f"\n- {action.capitalize()}"
+        org_context += "\nIf a user requests a disabled action, politely inform them that this feature is not available."
+
+    # Add active services info
+    active_services = org_config.get_active_services()
+    org_context += f"\n\nACTIVE SERVICES: {len(active_services)}"
+    for svc in active_services:
+        org_context += f"\n- {svc.name} ({svc.duration_minutes} min, ${svc.price:.2f})"
+
+    return base_prompt + org_context
+
+
+def create_agent_node_for_org(org_config: OrganizationConfig):
+    """
+    Create agent node function with organization-specific configuration.
+
+    Args:
+        org_config: Organization configuration
+
+    Returns:
+        Agent node function that uses org-specific prompt and tools
+    """
+    # Create tools based on permissions
+    tools_list = create_tools_for_org(org_config.permissions)
+
+    # Create LLM with tools bound
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm_with_tools = llm.bind_tools(tools_list)
+
+    def agent_node(state: AppointmentState) -> AppointmentState:
+        """
+        Agent node that uses org-specific system prompt.
+
+        Args:
+            state: Current appointment state
+
+        Returns:
+            Updated state with agent's response
+        """
+        # Build system prompt with org config
+        system_prompt = build_system_prompt_for_org(org_config, state)
+
+        # Get messages from state
+        messages = state.get("messages", [])
+
+        # Prepend system message
+        messages_with_system = [SystemMessage(content=system_prompt)] + messages
+
+        # Invoke LLM
+        response = llm_with_tools.invoke(messages_with_system)
+
+        # Return updated state
+        return {"messages": [response]}
+
+    return agent_node
+
+
+def create_agent_for_org(org_config: OrganizationConfig):
+    """
+    Create complete agent graph with organization-specific configuration.
+
+    THIS IS REAL - NOT A PLACEHOLDER.
+
+    Args:
+        org_config: Organization configuration
+
+    Returns:
+        Compiled StateGraph with org-specific settings
+    """
+    # Create org-specific agent node
+    agent_node = create_agent_node_for_org(org_config)
+
+    # Create tools node with only permitted tools
+    tools_list = create_tools_for_org(org_config.permissions)
+    tools_node = ToolNode(tools_list)
+
+    # Define conditional edge function
+    def should_continue(state: AppointmentState) -> str:
+        """Route to tools or end based on tool calls."""
+        messages = state.get("messages", [])
+        last_message = messages[-1] if messages else None
+
+        if last_message and hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            return "tools"
+        return END
+
+    # Build graph
+    workflow = StateGraph(AppointmentState)
+
+    # Add nodes
+    workflow.add_node("agent", agent_node)
+    workflow.add_node("tools", tools_node)
+
+    # Set entry point
+    workflow.set_entry_point("agent")
+
+    # Add conditional edges
+    workflow.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            "tools": "tools",
+            END: END
+        }
+    )
+
+    # Add edge from tools back to agent
+    workflow.add_edge("tools", "agent")
+
+    # Compile and return
+    return workflow.compile()
