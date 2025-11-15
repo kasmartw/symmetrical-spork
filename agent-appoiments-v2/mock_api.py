@@ -13,7 +13,10 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 import random
 import re
+from typing import Optional
 from src import config
+from src.config_manager import ConfigManager
+from src.org_config import OrganizationConfig
 
 app = Flask(__name__)
 CORS(app)
@@ -21,6 +24,30 @@ CORS(app)
 # In-memory storage
 appointments = []
 appointment_counter = 1000
+
+# Organization config manager (v1.5)
+org_manager = ConfigManager()
+
+
+def get_org_config(request_obj) -> Optional[OrganizationConfig]:
+    """
+    Get organization config from request header.
+
+    Args:
+        request_obj: Flask request object
+
+    Returns:
+        OrganizationConfig if X-Org-ID header present and valid, None otherwise
+    """
+    org_id = request_obj.headers.get('X-Org-ID')
+
+    if not org_id:
+        return None
+
+    try:
+        return org_manager.load_config(org_id)
+    except FileNotFoundError:
+        return None
 
 
 def generate_time_slots(service_id, date_from=None):
@@ -139,7 +166,36 @@ def validate_phone(phone):
 
 @app.route('/services', methods=['GET'])
 def get_services():
-    """GET /services - List all available services."""
+    """GET /services - List all available services.
+
+    Supports organization-specific services via X-Org-ID header (v1.5).
+    """
+    # Check for org-specific config
+    org_config = get_org_config(request)
+
+    if org_config:
+        # Return org-specific active services
+        active_services = org_config.get_active_services()
+        services_list = [
+            {
+                "id": s.id,
+                "name": s.name,
+                "description": s.description,
+                "duration_minutes": s.duration_minutes,
+                "price": s.price
+            }
+            for s in active_services
+        ]
+
+        return jsonify({
+            "success": True,
+            "services": services_list,
+            "total": len(services_list),
+            "org_id": org_config.org_id,
+            "org_name": org_config.org_name
+        })
+
+    # Default: return config.SERVICES
     return jsonify({
         "success": True,
         "services": config.SERVICES,
