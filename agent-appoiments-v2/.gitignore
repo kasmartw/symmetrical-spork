@@ -49,3 +49,16 @@ Thumbs.db
 
 # LangSmith/LangChain
 .langsmith/
+
+# LangGraph checkpoints and operational data
+.langgraph_api/
+*.pckl
+
+# Temporary test scripts (keep formal tests in tests/ directory)
+/test_complete_operations.py
+/test_concurrency.py
+/test_memory_concurrency.py
+/test_production_reality_check.py
+/test_production_simulation.py
+/test_streaming_client.py
+/test_token_optimization.py
