@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "appointment-agent"
-version = "1.2.0"
-description = "Secure appointment booking agent with LangGraph 1.0 (v1.2 - Performance & Features)"
+version = "1.10.0"
+description = "Optimized appointment booking agent with streaming API (v1.10 - latency optimizations)"
 requires-python = ">=3.10"
 dependencies = [
     "langgraph>=1.0.3",
@@ -21,6 +21,10 @@ dependencies = [
     "flask-cors>=4.0.0",
     "psycopg[pool]>=3.1.0",
     "langsmith>=0.1.0",
+    # v1.9 - Streaming API dependencies
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "langgraph-sdk>=0.1.0",
 ]
 
 [project.optional-dependencies]
