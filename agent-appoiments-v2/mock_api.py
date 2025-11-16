@@ -17,9 +17,19 @@ from typing import Optional
 from src import config
 from src.config_manager import ConfigManager
 from src.org_config import OrganizationConfig
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 CORS(app)
+
+# Rate limiting
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["10 per minute", "100 per hour"],
+    storage_uri="memory://"
+)
 
 # In-memory storage
 appointments = []
