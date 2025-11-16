@@ -103,101 +103,88 @@ def build_system_prompt(state: AppointmentState) -> str:
     v1.9: ~154 tokens (down from 1,100)
     v1.10: ~90 tokens (target) + automatic caching
     """
-    # Handle initialization from Studio (v1.6: Fix for Studio compatibility)
     current = state.get("current_state", ConversationState.COLLECT_SERVICE)
 
-    # OPTIMIZED BASE PROMPT (~150 tokens, down from 300)
-    base = """Friendly appointment assistant. Respond in user's language. Ask 1 question at a time.
+    # ULTRA-COMPRESSED BASE (~60 tokens, down from 174)
+    # Strategy: Remove ALL redundancy, use extreme abbreviations, single-line format
+    base = """Friendly appt assistant. User's lang. 1 Q/time.
+FLOWS: Book|Cancel|Reschedule
+TOOLS: get_services→list, fetch_cache(svc)→30d silent, filter_show(svc,time,off)→3d, validate_email/phone, create(…), cancel(conf#), get_appt(conf#), reschedule(conf#,dt,tm)
+SEC: conf# only"""
 
-FLOWS: Booking | Cancellation | Rescheduling
-
-TOOLS:
-get_services_tool() → list
-fetch_and_cache_availability_tool(svc_id) → cache 30d (silent)
-filter_and_show_availability_tool(svc_id, time_pref, offset) → show 3d
-validate_email_tool(email), validate_phone_tool(phone)
-create_appointment_tool(...) → book
-cancel_appointment_tool(conf#), get_appointment_tool(conf#), reschedule_appointment_tool(conf#, date, time)
-
-SECURITY: Cancel/reschedule need confirmation# ONLY (no email lookup)
-"""
-
-    # CONDENSED STATE PROMPTS (30-50 tokens each, down from 100-200)
-    state_prompts = {
+    # ULTRA-CONDENSED STATES (15-30 tokens each, down from 30-50)
+    states = {
         ConversationState.COLLECT_SERVICE:
-            "Call get_services_tool(). User picks → store service_id → call fetch_and_cache_availability_tool(service_id) (silent) → ask time preference (morning/afternoon/any).",
+            "get_services→pick→fetch_cache(svc_id) silent→ask time pref",
 
         ConversationState.COLLECT_TIME_PREFERENCE:
-            "Parse preference (morning/mañana/afternoon/tarde/any/cualquiera) → store time_preference → call filter_and_show_availability_tool(service_id, time_preference, 0).",
+            "Parse morn|aft|any→filter_show(svc,pref,0)",
 
         ConversationState.SHOW_AVAILABILITY:
-            "3 days shown. If 'more'/'más'/'next' → call filter_and_show_availability_tool(..., offset=3/6/9...).",
+            "3d shown. more→filter_show(…,off+3)",
 
         ConversationState.COLLECT_DATE:
-            "Ask user to choose date from shown slots.",
+            "Ask date from slots",
 
         ConversationState.COLLECT_TIME:
-            "Ask user to choose time from slots for selected date.",
+            "Ask time from date",
 
         ConversationState.COLLECT_NAME:
-            "Ask full name.",
+            "Ask name",
 
         ConversationState.COLLECT_EMAIL:
-            "Ask email → call validate_email_tool(email).",
+            "Ask email→validate",
 
         ConversationState.COLLECT_PHONE:
-            "Ask phone → call validate_phone_tool(phone).",
+            "Ask phone→validate",
 
         ConversationState.SHOW_SUMMARY:
-            "Show summary: service, date, time, name, email, phone, provider, location. Ask confirm (yes/no).",
+            "Show svc,dt,tm,name,email,phone,provider,loc→confirm?",
 
         ConversationState.CONFIRM:
-            "Wait yes/no. Yes → create. No → ask what to change.",
+            "Wait y/n. y→create. n→ask change",
 
         ConversationState.CREATE_APPOINTMENT:
-            "Call create_appointment_tool(service_id, date, start_time, client_name, client_email, client_phone).",
+            "create(svc_id,dt,tm,name,email,phone)",
 
         ConversationState.COMPLETE:
-            "Show confirmation# and thank user.",
+            "Show conf#, thank",
 
-        # Cancellation (v1.2, v1.3.1)
         ConversationState.CANCEL_ASK_CONFIRMATION:
-            "Ask confirmation# ONLY (e.g., APPT-1234). NO email lookup.",
+            "Ask conf# only",
 
         ConversationState.CANCEL_VERIFY:
-            "Call cancel_appointment_tool(conf#). [ERROR] → ask verify# (auto-escalates after 2 fails).",
+            "cancel(conf#). ERR→verify (2x→escalate)",
 
         ConversationState.CANCEL_CONFIRM:
-            "Ask 'Sure you want to cancel?'",
+            "Sure cancel?",
 
         ConversationState.CANCEL_PROCESS:
-            "Execute cancel_appointment_tool.",
+            "cancel(conf#)",
 
-        # Rescheduling (v1.3)
         ConversationState.RESCHEDULE_ASK_CONFIRMATION:
-            "Ask confirmation# ONLY.",
+            "Ask conf# only",
 
         ConversationState.RESCHEDULE_VERIFY:
-            "Call get_appointment_tool(conf#). [APPOINTMENT] → show details. [ERROR] → verify# (auto-escalates).",
+            "get_appt(conf#)→show. ERR→verify (2x→escalate)",
 
         ConversationState.RESCHEDULE_SELECT_DATETIME:
-            "Ask new date/time. Call get_availability_tool(service_id from verified appt). Show slots. Don't ask client info (preserved).",
+            "Ask new dt/tm. get_avail(svc). Show. Keep client info",
 
         ConversationState.RESCHEDULE_CONFIRM:
-            "Show: Old [date/time] → New [date/time]. Ask confirm. Don't ask client info.",
+            "Old→New. Confirm. Keep info",
 
         ConversationState.RESCHEDULE_PROCESS:
-            "Call reschedule_appointment_tool(conf#, new_date, new_time). Client info auto-preserved.",
+            "reschedule(conf#,dt,tm). Info preserved",
 
         ConversationState.POST_ACTION:
-            "Ask 'Need anything else? Book | Cancel | Reschedule'",
+            "Else? Book|Cancel|Reschedule",
     }
 
-    # Handle both enum and string values
-    current_value = current.value if hasattr(current, 'value') else current
-    instruction = state_prompts.get(current, f"STATE: {current_value}")
+    current_val = current.value if hasattr(current, 'value') else current
+    inst = states.get(current, f"S:{current_val}")
 
-    return base + f"\nCURRENT: {instruction}"
+    return f"{base}\nNOW: {inst}"
 
 
 def extract_text_from_content(content) -> str:
