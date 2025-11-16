@@ -21,8 +21,12 @@ from tenacity import (
 )
 import logging
 from src import config
+from src.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
+
+# Global circuit breaker for external API
+api_circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60)
 
 
 def create_http_session(
@@ -126,3 +130,32 @@ def create_http_session(
 
 # Global session (reuse connections)
 api_session = create_http_session()
+
+
+def api_call_with_protection(method: str, url: str, **kwargs):
+    """
+    Make API call with circuit breaker protection.
+
+    Args:
+        method: HTTP method (GET, POST, PATCH)
+        url: Request URL
+        **kwargs: Additional arguments for requests
+
+    Returns:
+        Response object
+
+    Raises:
+        CircuitBreakerOpen: If circuit is open
+        requests.exceptions.*: If request fails
+    """
+    def make_request():
+        if method.upper() == "GET":
+            return api_session.get(url, **kwargs)
+        elif method.upper() == "POST":
+            return api_session.post(url, **kwargs)
+        elif method.upper() == "PATCH":
+            return api_session.patch(url, **kwargs)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+
+    return api_circuit_breaker.call(make_request)
