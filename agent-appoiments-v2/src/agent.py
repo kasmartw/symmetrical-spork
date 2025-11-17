@@ -359,16 +359,13 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
     Pattern: Pure function returning partial state update.
     v1.10: Applies sliding window to enable automatic caching.
     v1.11: Validates message sequence to prevent OpenAI 400 errors.
+    v1.11.1: FIX - Apply sliding window BEFORE validation (not after)
     """
     messages = state.get("messages", [])
     # Handle initialization from Studio (v1.6: Fix for Studio compatibility)
     current = state.get("current_state", ConversationState.COLLECT_SERVICE)
 
-    # v1.11: CRITICAL FIX - Validate message sequence before processing
-    # Prevents: "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'"
-    messages = validate_message_sequence(messages)
-
-    # Security check on last user message
+    # Security check on last user message (before windowing)
     if messages:
         last_msg = messages[-1]
         if hasattr(last_msg, 'content') and last_msg.content:
@@ -385,11 +382,16 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
     # Build prompt
     system_prompt = build_system_prompt(state)
 
-    # OPTIMIZATION v1.10: Apply sliding window BEFORE adding system message
+    # OPTIMIZATION v1.10: Apply sliding window BEFORE validation
     # This keeps context bounded while maintaining conversation coherence
     # CRITICAL: Window ensures we don't send too many messages, but we still
     # need to add the system prompt fresh each time (OpenAI caches it automatically)
     windowed_messages = apply_sliding_window(messages, window_size=10)
+
+    # v1.11.1: CRITICAL FIX - Validate message sequence AFTER sliding window
+    # Prevents: Sliding window cutting between tool_call and tool message
+    # Order matters: window first (reduce messages), then validate (fix any orphans)
+    windowed_messages = validate_message_sequence(windowed_messages)
 
     # Add system message at the front (position 0)
     # OpenAI will cache this automatically since it's always the same content
@@ -400,6 +402,35 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
 
     # Log token usage (debug mode)
     log_tokens(response, context="Agent Node")
+
+    # v1.11.2: CRITICAL FIX - Ensure confirmation number appears when appointment is created
+    # Problem: LLM with compressed prompts doesn't consistently extract/show confirmation
+    # Solution: Post-process response to guarantee confirmation number is visible
+    # Trigger: Detect if create_appointment_tool was just called (has SUCCESS + APPT- pattern)
+    import re
+    from langchain_core.messages import ToolMessage
+
+    confirmation_number = None
+    # Look through recent messages for create_appointment tool result
+    # Check last 10 messages (not just last one, in case of retries)
+    for msg in reversed(state.get("messages", [])[-10:]):
+        if isinstance(msg, ToolMessage) or (hasattr(msg, 'type') and msg.type == 'tool'):
+            if hasattr(msg, 'content') and isinstance(msg.content, str):
+                # Only extract if it's a successful appointment creation
+                if '[SUCCESS]' in msg.content and 'Confirmation:' in msg.content:
+                    # Extract APPT-XXXXX pattern
+                    match = re.search(r'(APPT-\d+)', msg.content, re.IGNORECASE)
+                    if match:
+                        confirmation_number = match.group(1)
+                        break
+
+    # If we found a confirmation number and it's not in the response, add it
+    if confirmation_number:
+        response_text = response.content if hasattr(response, 'content') else str(response)
+        if confirmation_number not in response_text:
+            # Ensure confirmation is prominently displayed
+            if hasattr(response, 'content'):
+                response.content = f"{response.content}\n\n✅ Confirmation Number: **{confirmation_number}**"
 
     # Initialize state if this is the first interaction (v1.6: Studio compatibility)
     result = {"messages": [response]}
@@ -624,8 +655,11 @@ def create_production_graph():
 
     Use this in production environments with DATABASE_URL set.
     Falls back to MemorySaver if DATABASE_URL not available.
+
+    Pattern: Checkpointer is created once and reused via connection pool.
     """
-    from src.database import get_postgres_saver
+    from src.database import get_connection_pool
+    from langgraph.checkpoint.postgres import PostgresSaver
 
     builder = StateGraph(AppointmentState)
 
@@ -658,13 +692,20 @@ def create_production_graph():
     )
     builder.add_edge("retry_handler", "agent")
 
-    # Production checkpointer
+    # Production checkpointer with PostgreSQL
     if os.getenv("DATABASE_URL"):
-        with get_postgres_saver() as saver:
-            saver.setup()  # Create tables
-            return builder.compile(checkpointer=saver)
+        # Use PostgreSQL connection pool (long-lived saver)
+        pool = get_connection_pool()
+        conn = pool.connection()
+        saver = PostgresSaver(conn)
+        saver.setup()  # Create tables if not exist
+        return builder.compile(checkpointer=saver)
     else:
         # Fallback for development
+        import warnings
+        warnings.warn(
+            "DATABASE_URL not set - using MemorySaver (not production-ready)"
+        )
         return builder.compile(checkpointer=MemorySaver())
 
 
