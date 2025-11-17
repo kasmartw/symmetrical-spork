@@ -22,6 +22,7 @@ from src.api.models import ErrorResponse, ChatRequest, ChatResponse
 from src.api.dependencies import get_agent_graph
 from src.session_manager import SessionManager
 from src.api.streaming import stream_graph_events
+from src.api.org_loader import OrgConfigLoader, OrgNotFoundError
 
 # Configure structured logging
 logging.basicConfig(
@@ -84,8 +85,9 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Initialize SessionManager (singleton)
+# Initialize SessionManager and OrgConfigLoader (singletons)
 session_manager = SessionManager(database_url=os.getenv("DATABASE_URL", "sqlite:///sessions.db"))
+org_loader = OrgConfigLoader(database_url=os.getenv("DATABASE_URL", "sqlite:///sessions.db"))
 
 # CORS middleware for WordPress/Shopify integration
 app.add_middleware(
@@ -113,6 +115,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             error="Validation Error",
             detail=str(exc.errors()),
             code="VALIDATION_ERROR"
+        ).model_dump()
+    )
+
+
+@app.exception_handler(OrgNotFoundError)
+async def org_not_found_handler(request: Request, exc: OrgNotFoundError):
+    """Handle organization not found errors."""
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content=ErrorResponse(
+            error="Organization Not Found",
+            detail=str(exc),
+            code="ORG_NOT_FOUND"
         ).model_dump()
     )
 
