@@ -8,12 +8,14 @@ Features:
 """
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from langchain_core.messages import HumanMessage
 
-from src.api.models import ErrorResponse
+from src.api.models import ErrorResponse, ChatRequest, ChatResponse
+from src.api.dependencies import get_agent_graph
 
 # Configure structured logging
 logging.basicConfig(
@@ -26,10 +28,22 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown logic."""
+    from src.database import init_database, close_connection_pool
+
     logger.info("FastAPI server starting up...")
-    # Startup: Initialize database connections, etc.
+
+    # Startup: Initialize database tables
+    try:
+        init_database()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
+
     yield
+
     # Shutdown: Close connections
+    close_connection_pool()
     logger.info("FastAPI server shutting down...")
 
 
@@ -104,3 +118,65 @@ async def root():
         "docs": "/docs",
         "health": "/health"
     }
+
+
+@app.post("/api/v1/chat", tags=["Chat"], response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+    graph=Depends(get_agent_graph)
+):
+    """
+    Process chat message and return agent response.
+
+    Args:
+        request: ChatRequest with message, session_id, org_id
+        graph: Compiled LangGraph agent (injected dependency)
+
+    Returns:
+        ChatResponse with agent's reply and metadata
+
+    Raises:
+        422: Validation error
+        500: Internal server error
+    """
+    try:
+        # Configure LangGraph with session and org context
+        config = {
+            "configurable": {
+                "thread_id": str(request.session_id),  # Maps to PostgreSQL checkpoint
+                "org_id": request.org_id  # For multi-tenant configuration
+            }
+        }
+
+        # Invoke graph with user message
+        logger.info(f"Processing message for session={request.session_id}, org={request.org_id}")
+        result = graph.invoke(
+            {"messages": [HumanMessage(content=request.message)]},
+            config=config
+        )
+
+        # Extract response from last message
+        messages = result.get("messages", [])
+        if not messages:
+            raise ValueError("No response from agent")
+
+        last_message = messages[-1]
+        response_text = last_message.content if hasattr(last_message, 'content') else str(last_message)
+
+        # Build metadata
+        metadata = {
+            "current_state": str(result.get("current_state", "")),
+            "message_count": len(messages)
+        }
+
+        logger.info(f"Response generated for session={request.session_id}")
+
+        return ChatResponse(
+            response=response_text,
+            session_id=request.session_id,
+            metadata=metadata
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing chat: {e}", exc_info=True)
+        raise
