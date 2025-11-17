@@ -19,7 +19,7 @@ from fastapi.exceptions import RequestValidationError
 from langchain_core.messages import HumanMessage
 
 from src.api.models import ErrorResponse, ChatRequest, ChatResponse
-from src.api.dependencies import get_agent_graph
+from src.api.dependencies import get_agent_graph, validate_api_key
 from src.session_manager import SessionManager
 from src.api.streaming import stream_graph_events
 from src.api.org_loader import OrgConfigLoader, OrgNotFoundError
@@ -170,9 +170,13 @@ async def root():
 async def chat(
     request: ChatRequest,
     graph=Depends(get_agent_graph)
+    # NOTE: Add org_id_from_key: str = Depends(validate_api_key) for API key auth
 ):
     """
     Process chat message and return agent response.
+
+    Security: API key authentication available via validate_api_key dependency.
+    To enable: Add `org_id_from_key: str = Depends(validate_api_key)` parameter.
 
     Args:
         request: ChatRequest with message, session_id, org_id
@@ -182,6 +186,7 @@ async def chat(
         ChatResponse with agent's reply and metadata
 
     Raises:
+        401: Invalid API key (if auth enabled)
         422: Validation error
         500: Internal server error
     """
