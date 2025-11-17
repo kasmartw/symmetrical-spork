@@ -4,6 +4,7 @@ from functools import lru_cache
 from fastapi import Header, HTTPException, status
 from src.agent import create_production_graph
 from src.auth import APIKeyManager, InvalidAPIKeyError
+from src.rate_limiter import RateLimiter, RateLimitExceeded
 
 
 @lru_cache(maxsize=1)
@@ -20,8 +21,9 @@ def get_agent_graph():
     return create_production_graph()
 
 
-# Initialize API key manager (singleton)
+# Initialize singletons
 _api_key_manager = None
+_rate_limiter = None
 
 
 def get_api_key_manager() -> APIKeyManager:
@@ -32,6 +34,16 @@ def get_api_key_manager() -> APIKeyManager:
             database_url=os.getenv("DATABASE_URL", "sqlite:///sessions.db")
         )
     return _api_key_manager
+
+
+def get_rate_limiter() -> RateLimiter:
+    """Get or create rate limiter singleton."""
+    global _rate_limiter
+    if _rate_limiter is None:
+        _rate_limiter = RateLimiter()
+        # Set default limits (can be customized per org)
+        # Default: 100 requests/hour per organization
+    return _rate_limiter
 
 
 async def validate_api_key(x_api_key: str = Header(..., description="API Key")) -> str:
@@ -58,4 +70,25 @@ async def validate_api_key(x_api_key: str = Header(..., description="API Key")) 
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
             headers={"WWW-Authenticate": "ApiKey"}
+        )
+
+
+async def check_rate_limit(org_id: str) -> None:
+    """
+    FastAPI dependency for rate limit checking.
+
+    Args:
+        org_id: Organization identifier (from request or API key)
+
+    Raises:
+        HTTPException 429: If rate limit exceeded
+    """
+    try:
+        limiter = get_rate_limiter()
+        limiter.check_rate_limit(org_id)
+    except RateLimitExceeded as e:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(e),
+            headers={"Retry-After": str(e.retry_after)}
         )
