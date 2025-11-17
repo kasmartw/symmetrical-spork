@@ -10,7 +10,7 @@ from typing import Any, List, Optional
 from dotenv import load_dotenv
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, trim_messages
 from langchain_core.tools import BaseTool
 
 from langgraph.graph import StateGraph, START, END
@@ -82,109 +82,105 @@ llm_with_tools = llm.bind_tools(tools)
 
 def build_system_prompt(state: AppointmentState) -> str:
     """
-    Build context-aware system prompt (v1.10 - Optimized for automatic caching).
+    Build context-aware system prompt (v2.0 - EFFICIENCY OPTIMIZED with state inference).
 
-    OpenAI Automatic Caching Strategy:
-    - OpenAI caches the longest common prefix of your messages array
-    - No configuration needed - it's automatic and transparent
-    - Our job: Make the system prompt IDENTICAL across calls within same state
+    Changes from v1.10:
+    - Imperative commands instead of descriptive text
+    - Explicit parallel tool calling instructions
+    - Decision trees for common paths
+    - Works with automatic state inference (infer_current_state)
 
-    What we do:
-    1. System prompt depends ONLY on current_state (not messages, time, etc.)
-    2. Messages are handled separately via sliding window
-    3. Each conversation state has a deterministic, stable prompt
-    4. OpenAI sees identical prefix → automatic cache hit
-
-    Cache effectiveness:
-    - Same conversation state = cache hit (fast)
-    - Different conversation state = cache miss (expected)
-    - Typical conversation: 70-80% cache hit rate
-
-    v1.9: ~154 tokens (down from 1,100)
-    v1.10: ~90 tokens (target) + automatic caching
+    Optimization goal: Reduce from 7.2 to 3-4 iterations.
     """
-    current = state.get("current_state", ConversationState.COLLECT_SERVICE)
+    # v2.0: Get inferred state (dynamically updated)
+    current = infer_current_state(state)
 
-    # ULTRA-COMPRESSED BASE (~60 tokens, down from 174)
-    # Strategy: Remove ALL redundancy, use extreme abbreviations, single-line format
-    base = """Friendly appt assistant. User's lang. 1 Q/time.
+    # CORE RULES (~80 tokens, ultra-compressed)
+    base = """Efficient booking agent. USER'S LANGUAGE. 1 Q/time.
+IMPERATIVE: Use MULTIPLE tools in ONE response when possible.
+UPDATE: collected_data{} with extracted values EVERY turn.
+NEVER: fake data, skip validation, assume anything.
+
+TOOL COMBOS (use together):
+- Service selected → fetch_cache(svc_id) SILENT [no message to user]
+- User gives email+phone → validate_email(email) + validate_phone(phone) [PARALLEL]
+
 FLOWS: Book|Cancel|Reschedule
-TOOLS: get_services→list, fetch_cache(svc)→30d silent, filter_show(svc,time,off)→3d, validate_email/phone, create(…), cancel(conf#), get_appt(conf#), reschedule(conf#,dt,tm)
-SEC: conf# only"""
+SECURITY: conf# only for cancel/reschedule"""
 
-    # ULTRA-CONDENSED STATES (15-30 tokens each, down from 30-50)
+    # STATE-SPECIFIC DIRECTIVES (ultra-compressed)
     states = {
         ConversationState.COLLECT_SERVICE:
-            "get_services→pick→fetch_cache(svc_id) silent→ask time pref",
+            "ACTION: get_services() + show list → user picks → fetch_cache(svc_id) SILENT + ask 'morning/afternoon/any?'",
 
         ConversationState.COLLECT_TIME_PREFERENCE:
-            "Parse morn|aft|any→filter_show(svc,pref,0)",
+            "ACTION: filter_show(svc_id, time_pref='morning'|'afternoon'|'any', offset=0) → show 3 days",
 
         ConversationState.SHOW_AVAILABILITY:
-            "3d shown. more→filter_show(…,off+3)",
+            "SHOWN: 3 days. User wants more? filter_show(..., offset+3). User picks slot? → ask name",
 
         ConversationState.COLLECT_DATE:
-            "Ask date from slots",
+            "ASK: 'Which date?' WAIT. NO defaults.",
 
         ConversationState.COLLECT_TIME:
-            "Ask time from date",
+            "ASK: 'Which time?' WAIT. NO defaults.",
 
         ConversationState.COLLECT_NAME:
-            "Ask name",
+            "ASK: 'Full name?' WAIT. NO defaults. UPDATE collected_data{client_name}",
 
         ConversationState.COLLECT_EMAIL:
-            "Ask email→validate",
+            "ASK: 'Email?' WAIT → validate_email(input). INVALID? Re-ask. VALID? UPDATE collected_data{client_email}",
 
         ConversationState.COLLECT_PHONE:
-            "Ask phone→validate",
+            "ASK: 'Phone?' WAIT → validate_phone(input). INVALID? Re-ask. VALID? UPDATE collected_data{client_phone}",
 
         ConversationState.SHOW_SUMMARY:
-            "Show svc,dt,tm,name,email,phone,provider,loc→confirm?",
+            "SHOW: svc, date, time, name, email, phone, provider, location. ASK: 'Confirm?' [yes/no only]",
 
         ConversationState.CONFIRM:
-            "Wait y/n. y→create. n→ask change",
+            "WAIT yes/no. YES → create_appointment. NO → ask 'What to change?'",
 
         ConversationState.CREATE_APPOINTMENT:
-            "create(svc_id,dt,tm,name,email,phone)",
+            "NOW: create_appointment_tool(svc_id, date, start_time, name, email, phone) with REAL data. SHOW conf# prominently.",
 
         ConversationState.COMPLETE:
-            "Show conf#, thank",
+            "✅ Done. Show conf#. Ask 'Anything else?'",
 
         ConversationState.CANCEL_ASK_CONFIRMATION:
-            "Ask conf# only",
+            "ASK: 'Confirmation number?' (format: APPT-12345)",
 
         ConversationState.CANCEL_VERIFY:
-            "cancel(conf#). ERR→verify (2x→escalate)",
+            "ACTION: get_appointment_tool(conf#). SUCCESS? → show details. ERROR? retry (max 2×)",
 
         ConversationState.CANCEL_CONFIRM:
-            "Sure cancel?",
+            "SHOW details. ASK: 'Cancel this appointment?' yes/no",
 
         ConversationState.CANCEL_PROCESS:
-            "cancel(conf#)",
+            "ACTION: cancel_appointment_tool(conf#) → show confirmation",
 
         ConversationState.RESCHEDULE_ASK_CONFIRMATION:
-            "Ask conf# only",
+            "ASK: 'Confirmation number?'",
 
         ConversationState.RESCHEDULE_VERIFY:
-            "get_appt(conf#)→show. ERR→verify (2x→escalate)",
+            "ACTION: get_appointment_tool(conf#). SUCCESS? show current + ask new time. ERROR? retry (max 2×)",
 
         ConversationState.RESCHEDULE_SELECT_DATETIME:
-            "Ask new dt/tm. get_avail(svc). Show. Keep client info",
+            "ACTION: fetch_cache(svc_id) + filter_show(...) → show slots. User picks → confirm",
 
         ConversationState.RESCHEDULE_CONFIRM:
-            "Old→New. Confirm. Keep info",
+            "SHOW: old → new. ASK: 'Confirm reschedule?'",
 
         ConversationState.RESCHEDULE_PROCESS:
-            "reschedule(conf#,dt,tm). Info preserved",
+            "ACTION: reschedule_appointment_tool(conf#, new_date, new_time) → done",
 
         ConversationState.POST_ACTION:
-            "Else? Book|Cancel|Reschedule",
+            "ASK: 'Need anything else? Book|Cancel|Reschedule'",
     }
 
     current_val = current.value if hasattr(current, 'value') else current
-    inst = states.get(current, f"S:{current_val}")
+    directive = states.get(current, f"STATE: {current_val}")
 
-    return f"{base}\nNOW: {inst}"
+    return f"{base}\n\nCURRENT_STATE: {directive}"
 
 
 def extract_text_from_content(content) -> str:
@@ -307,24 +303,39 @@ def validate_message_sequence(messages: List) -> List:
 
         # Handle messages with tool_calls
         if hasattr(msg, 'tool_calls') and msg.tool_calls:
-            # Check if ALL tool_calls have responses
-            all_complete = True
+            # Separate complete and incomplete tool_calls
+            complete_tool_calls = []
+            incomplete_exists = False
+
             for tc in msg.tool_calls:
                 tc_id = tc.get('id') if isinstance(tc, dict) else getattr(tc, 'id', None)
-                if tc_id and not tool_calls_with_responses.get(tc_id, False):
-                    all_complete = False
-                    break
+                if tc_id and tool_calls_with_responses.get(tc_id, False):
+                    complete_tool_calls.append(tc)
+                else:
+                    incomplete_exists = True
 
-            if all_complete:
-                # Keep message as-is (all tool_calls have responses)
-                cleaned.append(msg)
+            if complete_tool_calls:
+                # Keep message but only with complete tool_calls
+                if incomplete_exists:
+                    # Create new message with filtered tool_calls
+                    from langchain_core.messages import AIMessage
+                    cleaned_msg = AIMessage(
+                        content=msg.content if hasattr(msg, 'content') else "",
+                        additional_kwargs=msg.additional_kwargs if hasattr(msg, 'additional_kwargs') else {},
+                        tool_calls=complete_tool_calls
+                    )
+                    cleaned.append(cleaned_msg)
+                else:
+                    # All tool_calls complete, keep as-is
+                    cleaned.append(msg)
             else:
-                # Strip tool_calls from message (incomplete responses)
-                # Convert to regular AI message without tool_calls
-                msg_copy = copy.copy(msg)
-                if hasattr(msg_copy, 'tool_calls'):
-                    msg_copy.tool_calls = []
-                cleaned.append(msg_copy)
+                # No complete tool_calls, strip all tool_calls
+                from langchain_core.messages import AIMessage
+                cleaned_msg = AIMessage(
+                    content=msg.content if hasattr(msg, 'content') else "",
+                    additional_kwargs=msg.additional_kwargs if hasattr(msg, 'additional_kwargs') else {}
+                )
+                cleaned.append(cleaned_msg)
 
             i += 1
 
@@ -352,18 +363,90 @@ def validate_message_sequence(messages: List) -> List:
     return cleaned
 
 
+def infer_current_state(state: AppointmentState) -> ConversationState:
+    """
+    Infer the current conversation state based on messages and tool calls (v2.0).
+
+    This enables automatic state progression for the v2.0 optimization.
+    The system analyzes the conversation history to determine where we are in the flow.
+    """
+    collected = state.get("collected_data", {})
+    messages = state.get("messages", [])
+
+    # Check for completion states
+    if collected.get("confirmation_number"):
+        return ConversationState.COMPLETE
+
+    # Analyze recent tool calls and messages to determine state
+    recent_tools_called = []
+    recent_user_messages = []
+
+    # Look at last 10 messages to understand context
+    for msg in messages[-10:]:
+        # Track tool calls
+        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            for tc in msg.tool_calls:
+                tool_name = tc.get('name') if isinstance(tc, dict) else getattr(tc, 'name', None)
+                if tool_name:
+                    recent_tools_called.append(tool_name)
+
+        # Track user messages
+        if hasattr(msg, 'type') and msg.type == 'human':
+            if hasattr(msg, 'content'):
+                recent_user_messages.append(str(msg.content).lower())
+
+    # Check booking flow progression based on collected_data
+    if collected.get("service_id"):
+        if collected.get("client_phone"):
+            return ConversationState.SHOW_SUMMARY
+        elif collected.get("client_email"):
+            return ConversationState.COLLECT_PHONE
+        elif collected.get("client_name"):
+            return ConversationState.COLLECT_EMAIL
+        elif collected.get("start_time"):
+            return ConversationState.COLLECT_NAME
+        elif collected.get("date"):
+            return ConversationState.COLLECT_TIME
+        elif state.get("available_slots") or 'filter_and_show_availability_tool' in recent_tools_called:
+            return ConversationState.SHOW_AVAILABILITY
+        else:
+            return ConversationState.COLLECT_TIME_PREFERENCE
+
+    # Check if we just called get_services (service selection in progress)
+    if 'get_services_tool' in recent_tools_called:
+        # Check if user has responded with a service choice
+        if len(recent_user_messages) > 0:
+            last_user_msg = recent_user_messages[-1]
+            # If user mentioned a service name, we're moving to time preference
+            if any(word in last_user_msg for word in ['consultation', 'appointment', 'follow']):
+                return ConversationState.COLLECT_TIME_PREFERENCE
+        return ConversationState.COLLECT_SERVICE
+
+    # Check for cancel/reschedule flows
+    recent_text = " ".join(recent_user_messages)
+    if 'cancel' in recent_text and 'appt-' not in recent_text:
+        return ConversationState.CANCEL_ASK_CONFIRMATION
+    elif 'reschedule' in recent_text and 'appt-' not in recent_text:
+        return ConversationState.RESCHEDULE_ASK_CONFIRMATION
+
+    # Default: collecting service
+    return ConversationState.COLLECT_SERVICE
+
+
 def agent_node(state: AppointmentState) -> dict[str, Any]:
     """
-    Agent node - calls LLM with security checks.
+    Agent node - calls LLM with security checks (v2.0 - with state inference).
 
     Pattern: Pure function returning partial state update.
     v1.10: Applies sliding window to enable automatic caching.
     v1.11: Validates message sequence to prevent OpenAI 400 errors.
     v1.11.1: FIX - Apply sliding window BEFORE validation (not after)
+    v2.0: Adds automatic state inference for dynamic progression
     """
     messages = state.get("messages", [])
-    # Handle initialization from Studio (v1.6: Fix for Studio compatibility)
-    current = state.get("current_state", ConversationState.COLLECT_SERVICE)
+
+    # v2.0: Infer current state automatically based on collected data
+    current = infer_current_state(state)
 
     # Security check on last user message (before windowing)
     if messages:
@@ -382,20 +465,57 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
     # Build prompt
     system_prompt = build_system_prompt(state)
 
-    # OPTIMIZATION v1.10: Apply sliding window BEFORE validation
-    # This keeps context bounded while maintaining conversation coherence
-    # CRITICAL: Window ensures we don't send too many messages, but we still
-    # need to add the system prompt fresh each time (OpenAI caches it automatically)
-    windowed_messages = apply_sliding_window(messages, window_size=10)
-
-    # v1.11.1: CRITICAL FIX - Validate message sequence AFTER sliding window
-    # Prevents: Sliding window cutting between tool_call and tool message
-    # Order matters: window first (reduce messages), then validate (fix any orphans)
-    windowed_messages = validate_message_sequence(windowed_messages)
+    # OPTIMIZATION v1.12: Use LangChain's trim_messages instead of manual sliding window
+    # FIX: Prevents OpenAI 400 errors from incomplete tool_call/tool_message pairs
+    #
+    # Why trim_messages is better:
+    # 1. Uses token count (2000 tokens) instead of message count (10 messages) - more precise
+    # 2. allow_partial=False ensures tool_call/tool_message pairs stay together
+    # 3. Handles edge cases automatically (no need for manual validate_message_sequence)
+    # 4. Still enables OpenAI's automatic caching via stable system message prefix
+    #
+    # What it does:
+    # - Counts tokens using the actual LLM's tokenizer
+    # - Keeps as many recent messages as possible within token limit
+    # - NEVER splits tool_call from its tool_message response
+    # - Preserves system messages automatically
+    if messages:
+        # Use trim_messages with token-based limit and safe partial handling
+        trimmed_messages = trim_messages(
+            messages,
+            max_tokens=2000,           # Token limit (more precise than message count)
+            strategy="last",           # Keep most recent messages
+            token_counter=llm,         # Use actual LLM tokenizer for accurate counting
+            allow_partial=False,       # CRITICAL: Never split tool_call/tool_message pairs
+            start_on="human",          # Prefer starting with user message
+        )
+    else:
+        trimmed_messages = []
 
     # Add system message at the front (position 0)
     # OpenAI will cache this automatically since it's always the same content
-    full_msgs = [SystemMessage(content=system_prompt)] + windowed_messages
+    full_msgs = [SystemMessage(content=system_prompt)] + trimmed_messages
+
+    # DIAGNOSTIC: Log message sequence before sending to OpenAI
+    print("\n" + "="*80)
+    print("🔍 DEBUG: Messages being sent to OpenAI")
+    print("="*80)
+    for i, msg in enumerate(full_msgs):
+        msg_type = type(msg).__name__
+        has_tool_calls = hasattr(msg, 'tool_calls') and msg.tool_calls
+        tool_call_count = len(msg.tool_calls) if has_tool_calls else 0
+        is_tool_msg = hasattr(msg, 'tool_call_id')
+
+        print(f"{i}. {msg_type}", end="")
+        if has_tool_calls:
+            print(f" [HAS {tool_call_count} TOOL_CALLS]", end="")
+            for tc in msg.tool_calls[:2]:  # Show first 2
+                tc_id = tc.get('id') if isinstance(tc, dict) else getattr(tc, 'id', '?')
+                print(f" {tc_id[:20]}...", end="")
+        if is_tool_msg:
+            print(f" [tool_call_id: {msg.tool_call_id[:20]}...]", end="")
+        print()
+    print("="*80 + "\n")
 
     # Call LLM (OpenAI handles caching automatically based on prefix match)
     response = llm_with_tools.invoke(full_msgs)
@@ -432,12 +552,16 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
             if hasattr(response, 'content'):
                 response.content = f"{response.content}\n\n✅ Confirmation Number: **{confirmation_number}**"
 
-    # Initialize state if this is the first interaction (v1.6: Studio compatibility)
-    result = {"messages": [response]}
-    if "current_state" not in state:
-        result["current_state"] = ConversationState.COLLECT_SERVICE
+    # v2.0: Always update current_state with inferred value
+    # This enables dynamic state progression based on collected data
+    result = {"messages": [response], "current_state": current}
+
+    # Initialize other fields if this is the first interaction (v1.6: Studio compatibility)
+    if "collected_data" not in state:
         result["collected_data"] = {}
+    if "available_slots" not in state:
         result["available_slots"] = []
+    if "retry_count" not in state:
         result["retry_count"] = {}
 
     return result
