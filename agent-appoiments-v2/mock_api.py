@@ -23,13 +23,22 @@ from flask_limiter.util import get_remote_address
 app = Flask(__name__)
 CORS(app)
 
-# Rate limiting
+# Rate limiting (relaxed for testing)
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["10 per minute", "100 per hour"],
+    default_limits=["200 per minute", "1000 per hour"],
     storage_uri="memory://"
 )
+
+# DEBUG: Log all incoming requests
+@app.before_request
+def log_request_info():
+    print(f"\n{'🌐 INCOMING REQUEST ':=^70}")
+    print(f"Path: {request.path}")
+    print(f"Method: {request.method}")
+    print(f"Content-Type: {request.content_type}")
+    print(f"{'='*70}\n")
 
 # In-memory storage
 appointments = []
@@ -268,6 +277,16 @@ def create_appointment():
     }
     """
     global appointment_counter
+
+    # DEBUG: Log request details
+    print(f"\n{'='*70}")
+    print(f"🔍 DEBUG - POST /appointments called")
+    print(f"Method: {request.method}")
+    print(f"Content-Type: {request.content_type}")
+    print(f"Headers: {dict(request.headers)}")
+    print(f"Raw data: {request.data}")
+    print(f"JSON data: {request.json}")
+    print(f"{'='*70}\n")
 
     data = request.json
     if not data:
@@ -606,7 +625,7 @@ def print_startup_info():
 if __name__ == '__main__':
     print_startup_info()
     app.run(
-        debug=True,
+        debug=False,
         port=config.MOCK_API_PORT,
         host='0.0.0.0'
     )

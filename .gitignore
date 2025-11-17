@@ -211,6 +211,10 @@ langsmith_traces/
 checkpoints/
 *.checkpoint
 
+# LangGraph API runtime state
+.langgraph_api/
+*.pckl
+
 # LLM-Guard models cache
 .llm_guard_cache/
 models/
