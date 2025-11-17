@@ -14,13 +14,14 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from langchain_core.messages import HumanMessage
 
 from src.api.models import ErrorResponse, ChatRequest, ChatResponse
 from src.api.dependencies import get_agent_graph
 from src.session_manager import SessionManager
+from src.api.streaming import stream_graph_events
 
 # Configure structured logging
 logging.basicConfig(
@@ -216,3 +217,56 @@ async def chat(
     except Exception as e:
         logger.error(f"Error processing chat: {e}", exc_info=True)
         raise
+
+
+@app.post("/api/v1/chat/stream", tags=["Chat"])
+async def chat_stream(
+    request: ChatRequest,
+    graph=Depends(get_agent_graph)
+):
+    """
+    Process chat message with Server-Sent Events streaming.
+
+    Streams real-time updates as the agent processes the request.
+    Useful for showing typing indicators or progressive responses.
+
+    Args:
+        request: ChatRequest with message, session_id, org_id
+        graph: Compiled LangGraph agent
+
+    Returns:
+        StreamingResponse with text/event-stream content
+
+    Response Format:
+        data: {"chunk": "partial text", "done": false, "metadata": {...}}
+        data: {"chunk": "", "done": true, "metadata": {...}}
+    """
+    # Get or create thread_id
+    thread_id = session_manager.get_or_create_thread_id(
+        session_id=str(request.session_id),
+        org_id=request.org_id
+    )
+
+    # Configure graph
+    config = {
+        "configurable": {
+            "thread_id": thread_id,
+            "org_id": request.org_id
+        }
+    }
+
+    # Prepare input
+    input_data = {"messages": [HumanMessage(content=request.message)]}
+
+    # Stream events
+    logger.info(f"Starting stream for session={request.session_id}")
+
+    return StreamingResponse(
+        stream_graph_events(graph, input_data, config),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
