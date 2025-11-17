@@ -22,13 +22,13 @@ def graph():
 
 @pytest.fixture
 def thread_config():
-    """Factory para crear configs de thread únicos."""
+    """Factory para crear configs de thread únicos con recursion_limit."""
     counter = {"value": 0}
 
     def _make_config(prefix="test"):
         counter["value"] += 1
         thread_id = f"{prefix}-{counter['value']}"
-        return {"configurable": {"thread_id": thread_id}}
+        return {"configurable": {"thread_id": thread_id, "recursion_limit": 10}}
 
     return _make_config
 
@@ -41,7 +41,7 @@ def booking_confirmation(graph):
     Se ejecuta UNA vez por sesión de pytest y se reutiliza.
     """
     thread_id = "fixture-booking"
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": thread_id, "recursion_limit": 10}}
 
     messages = [
         "Hola, quiero agendar una cita",

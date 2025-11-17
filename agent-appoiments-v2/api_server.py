@@ -153,7 +153,8 @@ async def chat(request: ChatRequest, req: Request):
                         stream_mode="messages",
                         config={
                             "configurable": {
-                                "org_id": org_id
+                                "org_id": org_id,
+                                "recursion_limit": 10
                             }
                         }
                     ):
@@ -205,7 +206,8 @@ async def chat(request: ChatRequest, req: Request):
                 input={"messages": [{"role": "user", "content": request.message}]},
                 config={
                     "configurable": {
-                        "org_id": org_id
+                        "org_id": org_id,
+                        "recursion_limit": 10
                     }
                 }
             )
@@ -267,7 +269,8 @@ async def chat_blocking(request: ChatRequest):
             input={"messages": [{"role": "user", "content": request.message}]},
             config={
                 "configurable": {
-                    "org_id": org_id
+                    "org_id": org_id,
+                    "recursion_limit": 10
                 }
             }
         )
