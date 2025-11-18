@@ -433,15 +433,16 @@ def infer_current_state(state: AppointmentState) -> ConversationState:
     return ConversationState.COLLECT_SERVICE
 
 
-def agent_node(state: AppointmentState) -> dict[str, Any]:
+async def agent_node(state: AppointmentState) -> dict[str, Any]:
     """
-    Agent node - calls LLM with security checks (v2.0 - with state inference).
+    Agent node - calls LLM with security checks (v2.0 - ASYNC for concurrency).
 
-    Pattern: Pure function returning partial state update.
+    Pattern: Pure async function returning partial state update.
     v1.10: Applies sliding window to enable automatic caching.
     v1.11: Validates message sequence to prevent OpenAI 400 errors.
     v1.11.1: FIX - Apply sliding window BEFORE validation (not after)
     v2.0: Adds automatic state inference for dynamic progression
+    v2.1: ASYNC - Critical fix for concurrent user support
     """
     messages = state.get("messages", [])
 
@@ -518,7 +519,8 @@ def agent_node(state: AppointmentState) -> dict[str, Any]:
     print("="*80 + "\n")
 
     # Call LLM (OpenAI handles caching automatically based on prefix match)
-    response = llm_with_tools.invoke(full_msgs)
+    # v2.1: ASYNC ainvoke for true concurrency (not blocking invoke)
+    response = await llm_with_tools.ainvoke(full_msgs)
 
     # Log token usage (debug mode)
     log_tokens(response, context="Agent Node")
@@ -942,9 +944,9 @@ def create_agent_node_for_org(org_config: OrganizationConfig):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     llm_with_tools = llm.bind_tools(tools_list)
 
-    def agent_node(state: AppointmentState) -> AppointmentState:
+    async def agent_node(state: AppointmentState) -> AppointmentState:
         """
-        Agent node that uses org-specific system prompt.
+        Agent node that uses org-specific system prompt (v2.1 - ASYNC).
 
         Args:
             state: Current appointment state
@@ -961,8 +963,8 @@ def create_agent_node_for_org(org_config: OrganizationConfig):
         # Prepend system message
         messages_with_system = [SystemMessage(content=system_prompt)] + messages
 
-        # Invoke LLM
-        response = llm_with_tools.invoke(messages_with_system)
+        # Invoke LLM (v2.1: ASYNC for concurrency)
+        response = await llm_with_tools.ainvoke(messages_with_system)
 
         # Return updated state
         return {"messages": [response]}

@@ -8,9 +8,10 @@ from langchain_core.messages import HumanMessage
 from src.agent import create_graph
 
 
-def test_recursion_limit_configured():
+@pytest.mark.asyncio
+async def test_recursion_limit_configured():
     """
-    Test that recursion_limit is properly configured in the system.
+    Test that recursion_limit is properly configured in the system (v2.1 - ASYNC).
 
     This validates that we're using LangGraph's native recursion_limit
     instead of manual iteration_count tracking.
@@ -28,8 +29,8 @@ def test_recursion_limit_configured():
         }
     }
 
-    # Should complete successfully with proper limit
-    result = graph.invoke(
+    # Should complete successfully with proper limit (using ainvoke)
+    result = await graph.ainvoke(
         {"messages": [HumanMessage(content="Hello")]},
         config=config
     )
@@ -39,10 +40,12 @@ def test_recursion_limit_configured():
 
     print("✅ recursion_limit is properly configured (native LangGraph feature)")
     print("✅ Replaced manual iteration_count tracking")
+    print("✅ Agent now async for concurrent users (v2.1)")
 
 
-def test_normal_flow_within_limit():
-    """Test that normal flow completes within limit."""
+@pytest.mark.asyncio
+async def test_normal_flow_within_limit():
+    """Test that normal flow completes within limit (v2.1 - ASYNC)."""
     graph = create_graph()
 
     config = {
@@ -52,8 +55,8 @@ def test_normal_flow_within_limit():
         }
     }
 
-    # Should complete without hitting limit
-    result = graph.invoke(
+    # Should complete without hitting limit (using ainvoke)
+    result = await graph.ainvoke(
         {"messages": [HumanMessage(content="Hello")]},
         config=config
     )
@@ -63,15 +66,16 @@ def test_normal_flow_within_limit():
     print("✅ Completed within recursion_limit")
 
 
-def test_recursion_limit_per_request():
-    """Test that recursion_limit is per-request, not global."""
+@pytest.mark.asyncio
+async def test_recursion_limit_per_request():
+    """Test that recursion_limit is per-request, not global (v2.1 - ASYNC)."""
     graph = create_graph()
 
     # Request 1: Low limit (will fail)
     config1 = {"configurable": {"thread_id": "user-1", "recursion_limit": 2}}
 
     try:
-        graph.invoke(
+        await graph.ainvoke(
             {"messages": [HumanMessage(content="complex gibberish request xyz")]},
             config1
         )
@@ -81,7 +85,7 @@ def test_recursion_limit_per_request():
     # Request 2: Normal limit (should succeed)
     config2 = {"configurable": {"thread_id": "user-2", "recursion_limit": 10}}
 
-    result = graph.invoke(
+    result = await graph.ainvoke(
         {"messages": [HumanMessage(content="Hello")]},
         config2
     )
@@ -90,14 +94,15 @@ def test_recursion_limit_per_request():
     print("✅ recursion_limit is per-request (not global)")
 
 
-def test_recursion_limit_default_value():
-    """Test that a reasonable recursion_limit is set in configs."""
+@pytest.mark.asyncio
+async def test_recursion_limit_default_value():
+    """Test that a reasonable recursion_limit is set in configs (v2.1 - ASYNC)."""
     graph = create_graph()
 
     # Config with recursion_limit
     config = {"configurable": {"thread_id": "test-default", "recursion_limit": 10}}
 
-    result = graph.invoke(
+    result = await graph.ainvoke(
         {"messages": [HumanMessage(content="Book appointment")]},
         config=config
     )
